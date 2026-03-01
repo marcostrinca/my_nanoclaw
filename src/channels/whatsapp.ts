@@ -168,6 +168,9 @@ export class WhatsAppChannel implements Channel {
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
+            (msg.message?.templateMessage ? '[Template message]' : '') ||
+            ((msg.message as any)?.interactiveMessage ? '[Interactive/Carousel message]' : '') ||
+            ((msg.message as any)?.listMessage?.title ? `[List: ${(msg.message as any).listMessage.title}]` : '') ||
             '';
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -217,6 +220,24 @@ export class WhatsAppChannel implements Channel {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text: prefixed });
       logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
+    }
+  }
+
+  async sendImage(jid: string, imagePath: string, caption?: string): Promise<void> {
+    const imageBuffer = fs.readFileSync(imagePath);
+
+    if (!this.connected) {
+      logger.warn({ jid, imagePath }, 'WA disconnected, cannot send image');
+      return;
+    }
+    try {
+      await this.sock.sendMessage(jid, {
+        image: imageBuffer,
+        caption: caption || undefined,
+      });
+      logger.info({ jid, imagePath, hasCaption: !!caption }, 'Image sent');
+    } catch (err) {
+      logger.error({ jid, imagePath, err }, 'Failed to send image');
     }
   }
 

@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
+  model?: string;
 }
 
 interface ContainerOutput {
@@ -34,6 +35,7 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  notification?: string;
 }
 
 interface SessionEntry {
@@ -203,6 +205,35 @@ function createSanitizeBashHook(): HookCallback {
           ...(preInput.tool_input as Record<string, unknown>),
           command: unsetPrefix + command,
         },
+      },
+    };
+  };
+}
+
+// Pattern that must appear in the original user prompt to allow sending email.
+// Matches Portuguese and English variants.
+const EMAIL_SEND_PATTERN = /\b(envia|manda|send|draft|rascunho|escreve|responde|reply|forward|encaminha)\b.*\b(email|e-mail|mail|gmail)\b|\b(email|e-mail|mail|gmail)\b.*\b(envia|manda|send|draft|rascunho|escreve|responde|reply|forward|encaminha)\b/i;
+
+function createGmailGuardHook(originalPrompt: string): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const toolName = preInput.tool_name;
+
+    // Only guard send/draft tools
+    if (toolName !== 'mcp__gmail__send_email' && toolName !== 'mcp__gmail__draft_email') {
+      return {};
+    }
+
+    if (EMAIL_SEND_PATTERN.test(originalPrompt)) {
+      return {}; // Allow — user explicitly asked to send
+    }
+
+    log(`BLOCKED ${toolName} — user prompt did not explicitly request sending email`);
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        decision: 'block',
+        reason: 'Email sending blocked: the user did not explicitly ask to send or draft an email in this message. Only read operations are allowed unless the user explicitly requests sending.',
       },
     };
   };
@@ -416,6 +447,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: containerInput.model,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -431,7 +463,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__gmail__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -447,10 +480,18 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        gmail: {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        },
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook()] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
+          { matcher: 'mcp__gmail__send_email', hooks: [createGmailGuardHook(prompt)] },
+          { matcher: 'mcp__gmail__draft_email', hooks: [createGmailGuardHook(prompt)] },
+        ],
       },
     }
   })) {
@@ -460,6 +501,25 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+    }
+
+    // Emit tool_use notifications so users can see agent activity
+    if (message.type === 'assistant' && 'content' in message) {
+      const content = (message as { content?: unknown[] }).content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          const b = block as { type?: string; name?: string; input?: unknown };
+          if (b.type === 'tool_use') {
+            const toolName = b.name || 'unknown';
+            const inputPreview = JSON.stringify(b.input || {}).slice(0, 100);
+            writeOutput({
+              status: 'success',
+              result: null,
+              notification: `🔧 ${toolName}: ${inputPreview}`,
+            });
+          }
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {

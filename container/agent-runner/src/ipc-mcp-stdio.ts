@@ -63,6 +63,43 @@ server.tool(
 );
 
 server.tool(
+  'send_whatsapp',
+  `Send a WhatsApp message (with optional image) to any JID. Main group only.
+Use this to interact with external WhatsApp contacts or bots for testing, QA, or automation.
+The image_path must be an absolute path accessible inside the container (e.g., /workspace/ipc/input/selfie.jpg).`,
+  {
+    jid: z.string().describe('Target WhatsApp JID (e.g., "551151940720@s.whatsapp.net")'),
+    text: z.string().describe('Message text to send'),
+    image_path: z.string().optional().describe('Absolute path to an image file to send (optional)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can use send_whatsapp.' }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'message',
+      chatJid: args.jid,
+      text: args.text,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (args.image_path) {
+      data.imagePath = args.image_path;
+    }
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    const desc = args.image_path ? 'Message with image' : 'Message';
+    return { content: [{ type: 'text' as const, text: `${desc} sent to ${args.jid}.` }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 

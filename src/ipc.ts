@@ -8,6 +8,7 @@ import {
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
+  WHATSAPP_SEND_ALLOWLIST_PATH,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
@@ -16,6 +17,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendImage?: (jid: string, imagePath: string, caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -26,6 +28,23 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+}
+
+/**
+ * Load the WhatsApp send allowlist from the external config file.
+ * This file is stored outside the project root so agents can't modify it.
+ * Re-read on every check so changes take effect without restart.
+ */
+function loadSendAllowlist(): Set<string> {
+  try {
+    if (fs.existsSync(WHATSAPP_SEND_ALLOWLIST_PATH)) {
+      const data = JSON.parse(fs.readFileSync(WHATSAPP_SEND_ALLOWLIST_PATH, 'utf-8'));
+      return new Set(data.allowedJids || []);
+    }
+  } catch (err) {
+    logger.error({ err, path: WHATSAPP_SEND_ALLOWLIST_PATH }, 'Failed to load WhatsApp send allowlist');
+  }
+  return new Set();
 }
 
 let ipcWatcherRunning = false;
@@ -74,20 +93,60 @@ export function startIpcWatcher(deps: IpcDeps): void {
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
+                const isOwnGroup = targetGroup && targetGroup.folder === sourceGroup;
+
+                let authorized = false;
+                if (isOwnGroup) {
+                  // Always allowed: sending to own group's JID
+                  authorized = true;
+                } else if (isMain) {
+                  // Main sending to foreign JID: require allowlist
+                  const allowlist = loadSendAllowlist();
+                  if (allowlist.has(data.chatJid)) {
+                    authorized = true;
+                  } else {
+                    logger.warn(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'Main IPC message to non-allowlisted JID blocked',
+                    );
+                  }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
                   );
+                }
+
+                if (authorized) {
+                  if (data.imagePath && deps.sendImage) {
+                    // Translate container path to host path
+                    // Container: /workspace/ipc/input/file.jpg
+                    // Host: DATA_DIR/ipc/{sourceGroup}/input/file.jpg
+                    let hostImagePath = data.imagePath;
+                    if (data.imagePath.startsWith('/workspace/ipc/')) {
+                      const relativePath = data.imagePath.replace('/workspace/ipc/', '');
+                      hostImagePath = path.join(ipcBaseDir, sourceGroup, relativePath);
+                    }
+
+                    if (!fs.existsSync(hostImagePath)) {
+                      logger.error(
+                        { containerPath: data.imagePath, hostPath: hostImagePath },
+                        'Image file not found on host',
+                      );
+                    } else {
+                      await deps.sendImage(data.chatJid, hostImagePath, data.text || undefined);
+                      logger.info(
+                        { chatJid: data.chatJid, sourceGroup, imagePath: hostImagePath },
+                        'IPC image sent',
+                      );
+                    }
+                  } else {
+                    await deps.sendMessage(data.chatJid, data.text);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC message sent',
+                    );
+                  }
                 }
               }
               fs.unlinkSync(filePath);
