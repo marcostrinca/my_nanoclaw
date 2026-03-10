@@ -72,11 +72,11 @@ export const TRIGGER_PATTERN = new RegExp(
 // Model switching
 export const MODEL_ALIASES: Record<string, string> = {
   opus: 'claude-opus-4-6',
-  sonnet: 'claude-sonnet-4-5-20250929',
+  sonnet: 'claude-sonnet-4-6',
   haiku: 'claude-haiku-4-5-20251001',
 };
 
-export const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
+export const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 // Matches: "usa sonnet", "use haiku", "usa opus", "modelo sonnet"
 export const MODEL_SWITCH_PATTERN = /^(?:usa|use|modelo)\s+(opus|sonnet|haiku)$/i;

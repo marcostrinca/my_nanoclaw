@@ -301,14 +301,14 @@ export class TelegramChannel implements Channel {
 
       // Convert to WAV (16kHz mono) — whisper-cli can't decode OGA/Opus directly
       execSync(
-        `/opt/local/bin/ffmpeg -i "${srcPath}" -ar 16000 -ac 1 -f wav "${wavPath}" -y`,
+        `ffmpeg -i "${srcPath}" -ar 16000 -ac 1 -f wav "${wavPath}" -y`,
         { stdio: 'pipe' },
       );
 
       // Transcribe with whisper-cli
-      const modelPath = '/opt/homebrew/share/whisper-cpp/models/ggml-base.bin';
+      const modelPath = '/usr/local/share/whisper-cpp/models/ggml-base.bin';
       const output = execSync(
-        `/opt/homebrew/bin/whisper-cli -m "${modelPath}" --no-timestamps -l auto "${wavPath}"`,
+        `whisper-cli -m "${modelPath}" --no-timestamps -l auto "${wavPath}"`,
         { encoding: 'utf-8', timeout: 60000 },
       ).trim();
 

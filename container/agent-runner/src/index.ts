@@ -378,6 +378,51 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+const GDRIVE_CREDS_DIR = '/home/node/.gdrive-mcp';
+const GDRIVE_KEYS_PATH = `${GDRIVE_CREDS_DIR}/gcp-oauth.keys.json`;
+
+/**
+ * Read Google Drive OAuth credentials from the mounted credentials directory.
+ * Returns mcpServers entries for gdrive (read) and gdrive-write if credentials are present.
+ */
+function readGdriveServerConfig(): Record<string, unknown> {
+  if (!fs.existsSync(GDRIVE_KEYS_PATH)) return {};
+
+  try {
+    const keys = JSON.parse(fs.readFileSync(GDRIVE_KEYS_PATH, 'utf-8'));
+    const creds = keys.installed || keys.web;
+    if (!creds?.client_id || !creds?.client_secret) {
+      log('gdrive: keys.json found but missing client_id or client_secret');
+      return {};
+    }
+
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const gdriveWriteMcpPath = path.join(__dirname, 'gdrive-write-mcp.js');
+
+    return {
+      gdrive: {
+        command: 'npx',
+        args: ['-y', '@isaacphi/mcp-gdrive'],
+        env: {
+          CLIENT_ID: creds.client_id,
+          CLIENT_SECRET: creds.client_secret,
+          GDRIVE_CREDS_DIR,
+        },
+      },
+      ...(fs.existsSync(gdriveWriteMcpPath) ? {
+        'gdrive-write': {
+          command: 'node',
+          args: [gdriveWriteMcpPath],
+          env: { GDRIVE_CREDS_DIR },
+        },
+      } : {}),
+    };
+  } catch (err) {
+    log(`gdrive: failed to read credentials: ${err instanceof Error ? err.message : String(err)}`);
+    return {};
+  }
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -464,7 +509,9 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__gmail__*'
+        'mcp__gmail__*',
+        'mcp__gdrive__*',
+        'mcp__gdrive-write__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -484,6 +531,7 @@ async function runQuery(
           command: 'npx',
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
         },
+        ...readGdriveServerConfig(),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook()] }],
