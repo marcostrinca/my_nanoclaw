@@ -15,6 +15,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OLLAMA_ADMIN_TOOLS,
   STORE_DIR,
   TIMEZONE,
   WHATSAPP_OWNER_JID,
@@ -293,6 +294,11 @@ function buildContainerArgs(
     args.push('-e', `WHATSAPP_OWNER_JID=${WHATSAPP_OWNER_JID}`);
   }
 
+  // Forward Ollama admin tools flag if enabled
+  if (OLLAMA_ADMIN_TOOLS) {
+    args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
+  }
+
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
     '-e',
@@ -300,9 +306,6 @@ function buildContainerArgs(
   );
 
   // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
@@ -454,7 +457,12 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (!line) continue;
+        if (line.includes('[OLLAMA]')) {
+          logger.info({ container: group.folder }, line);
+        } else {
+          logger.debug({ container: group.folder }, line);
+        }
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).

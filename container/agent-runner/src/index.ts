@@ -515,6 +515,7 @@ async function runQuery(
         'mcp__gmail__*',
         'mcp__gdrive__*',
         'mcp__gdrive-write__*',
+        'mcp__ollama__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -535,6 +536,10 @@ async function runQuery(
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
         },
         ...readGdriveServerConfig(),
+        ollama: {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
+        },
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook()] }],
