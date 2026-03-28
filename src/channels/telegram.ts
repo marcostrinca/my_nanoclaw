@@ -311,13 +311,20 @@ export class TelegramChannel implements Channel {
 
       // Transcribe with whisper-cli
       // Model path priority: ~/.nanoclaw-config/whisper-model > WHISPER_MODEL env > default
-      const configModelFile = path.join(os.homedir(), '.nanoclaw-config', 'whisper-model');
+      const configModelFile = path.join(
+        os.homedir(),
+        '.nanoclaw-config',
+        'whisper-model',
+      );
       const modelPath = (() => {
         try {
           const p = fs.readFileSync(configModelFile, 'utf-8').trim();
           if (p) return p;
         } catch {}
-        return process.env.WHISPER_MODEL || '/usr/local/share/whisper-cpp/models/ggml-base.bin';
+        return (
+          process.env.WHISPER_MODEL ||
+          '/usr/local/share/whisper-cpp/models/ggml-base.bin'
+        );
       })();
       logger.debug({ modelPath }, 'Using whisper model');
       const output = execSync(

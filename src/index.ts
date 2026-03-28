@@ -17,10 +17,7 @@ import {
 } from './config.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { startCredentialProxy } from './credential-proxy.js';
-import {
-  initWhatsAppSender,
-  sendWhatsAppMessage,
-} from './whatsapp-sender.js';
+import { initWhatsAppSender, sendWhatsAppMessage } from './whatsapp-sender.js';
 import {
   ContainerOutput,
   runContainerAgent,

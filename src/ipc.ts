@@ -23,7 +23,11 @@ export interface IpcDeps {
     imagePath: string,
     caption?: string,
   ) => Promise<void>;
-  sendWhatsApp?: (jid: string, text: string, imagePath?: string) => Promise<void>;
+  sendWhatsApp?: (
+    jid: string,
+    text: string,
+    imagePath?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -278,27 +282,46 @@ export async function processTaskIpc(
     case 'whatsapp_send':
       // Only main group can send WhatsApp messages
       if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized whatsapp_send attempt blocked');
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized whatsapp_send attempt blocked',
+        );
         break;
       }
       if (!data.to || !data.text) {
-        logger.warn({ sourceGroup }, 'whatsapp_send missing "to" or "text" field');
+        logger.warn(
+          { sourceGroup },
+          'whatsapp_send missing "to" or "text" field',
+        );
         break;
       }
       if (!deps.sendWhatsApp) {
-        logger.warn('whatsapp_send requested but WhatsApp sender not initialized');
+        logger.warn(
+          'whatsapp_send requested but WhatsApp sender not initialized',
+        );
         break;
       }
       let hostImagePath = data.imagePath;
       if (hostImagePath) {
         if (hostImagePath.startsWith('/workspace/ipc/') && ipcBaseDir) {
-          hostImagePath = path.join(ipcBaseDir, sourceGroup, hostImagePath.replace('/workspace/ipc/', ''));
+          hostImagePath = path.join(
+            ipcBaseDir,
+            sourceGroup,
+            hostImagePath.replace('/workspace/ipc/', ''),
+          );
         } else if (hostImagePath.startsWith('/workspace/group/')) {
-          hostImagePath = path.join(GROUPS_DIR, sourceGroup, hostImagePath.replace('/workspace/group/', ''));
+          hostImagePath = path.join(
+            GROUPS_DIR,
+            sourceGroup,
+            hostImagePath.replace('/workspace/group/', ''),
+          );
         }
       }
       await deps.sendWhatsApp(data.to, data.text, hostImagePath);
-      logger.info({ to: data.to, sourceGroup, hasImage: !!hostImagePath }, 'WhatsApp message sent via IPC');
+      logger.info(
+        { to: data.to, sourceGroup, hasImage: !!hostImagePath },
+        'WhatsApp message sent via IPC',
+      );
       break;
 
     case 'schedule_task':
