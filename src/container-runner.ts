@@ -17,6 +17,7 @@ import {
   IDLE_TIMEOUT,
   STORE_DIR,
   TIMEZONE,
+  WHATSAPP_OWNER_JID,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -198,6 +199,27 @@ function buildVolumeMounts(
     });
   }
 
+  // Persistent config directory — agent can write config overrides (e.g. whisper-model)
+  // that the host process reads on next use, without needing to touch .env
+  const nanoclawConfigDir = path.join(homeDir, '.nanoclaw-config');
+  fs.mkdirSync(nanoclawConfigDir, { recursive: true });
+  mounts.push({
+    hostPath: nanoclawConfigDir,
+    containerPath: '/workspace/config',
+    readonly: false,
+  });
+
+  // Whisper models directory — agent can download new models here (wget/curl available)
+  // and update /workspace/config/whisper-model to switch models on the host
+  const whisperModelsDir = '/usr/local/share/whisper-cpp/models';
+  if (fs.existsSync(whisperModelsDir)) {
+    mounts.push({
+      hostPath: whisperModelsDir,
+      containerPath: '/workspace/whisper-models',
+      readonly: false,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -256,6 +278,11 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Pass WhatsApp owner JID so the MCP server knows the default destination
+  if (WHATSAPP_OWNER_JID) {
+    args.push('-e', `WHATSAPP_OWNER_JID=${WHATSAPP_OWNER_JID}`);
+  }
+
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
     '-e',
@@ -285,7 +312,6 @@ function buildContainerArgs(
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
-
 
   for (const mount of mounts) {
     if (mount.readonly) {

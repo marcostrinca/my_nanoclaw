@@ -56,6 +56,19 @@ When transcribing audio notes and preparing weekly reports:
 - Focus on capturing the substance and context of conversations, not just keywords
 - Make summaries comprehensive enough to convey the full meaning and implications
 
+## Sending WhatsApp Messages
+
+You can send WhatsApp messages to the user via IPC:
+
+```bash
+echo "{\"type\":\"whatsapp_send\",\"to\":\"$WHATSAPP_OWNER_JID\",\"text\":\"Sua mensagem aqui\"}" \
+  > /workspace/ipc/tasks/wa_$(date +%s%N).json
+```
+
+The user's WhatsApp JID is `5511972182222-1567362981@g.us` (grupo "Eu mesmo").
+
+Use WhatsApp for urgent notifications the user should see even when not in Telegram. Don't send unless the user explicitly asks or the situation clearly warrants it.
+
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:
@@ -80,11 +93,44 @@ Main has read-only access to the project and read-write access to its group fold
 |----------------|-----------|--------|
 | `/workspace/project` | Project root | read-only |
 | `/workspace/group` | `groups/main/` | read-write |
+| `/workspace/config` | `~/.nanoclaw-config/` | read-write |
+| `/workspace/whisper-models` | `/usr/local/share/whisper-cpp/models/` | read-write |
 
 Key paths inside the container:
 - `/workspace/project/store/messages.db` - SQLite database
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
+
+### Configurações persistentes do host
+
+Você pode gravar configurações em `/workspace/config/` que o host lê automaticamente:
+
+- **`/workspace/config/whisper-model`** — caminho completo para o modelo Whisper a usar na transcrição de voz. Exemplo:
+  ```
+  /usr/local/share/whisper-cpp/models/ggml-medium.bin
+  ```
+  O host lê este arquivo antes de cada transcrição. Não é necessário reiniciar.
+
+### Baixar modelos Whisper
+
+Os modelos estão em `/workspace/whisper-models/`. Use `wget` ou `curl` para baixar novos modelos diretamente nessa pasta. Exemplos de modelos (do mais leve ao mais preciso):
+
+| Modelo | Arquivo | Tamanho |
+|--------|---------|---------|
+| tiny | ggml-tiny.bin | ~75 MB |
+| base | ggml-base.bin | ~142 MB (atual) |
+| small | ggml-small.bin | ~466 MB |
+| medium | ggml-medium.bin | ~1.5 GB |
+| large-v3-turbo | ggml-large-v3-turbo.bin | ~1.6 GB |
+
+URL base para download: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/`
+
+Exemplo para baixar e ativar o modelo `small`:
+```bash
+wget -O /workspace/whisper-models/ggml-small.bin \
+  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+echo "/usr/local/share/whisper-cpp/models/ggml-small.bin" > /workspace/config/whisper-model
+```
 
 ---
 
@@ -139,7 +185,7 @@ Groups are registered in the SQLite `registered_groups` table:
   "1234567890-1234567890@g.us": {
     "name": "Family Chat",
     "folder": "family-chat",
-    "trigger": "@Lineu",
+    "trigger": "@Yume",
     "added_at": "2024-01-31T12:00:00.000Z"
   }
 }
@@ -184,7 +230,7 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
   "1234567890@g.us": {
     "name": "Dev Team",
     "folder": "dev-team",
-    "trigger": "@Lineu",
+    "trigger": "@Yume",
     "added_at": "2026-01-31T12:00:00Z",
     "containerConfig": {
       "additionalMounts": [

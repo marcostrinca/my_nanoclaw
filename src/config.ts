@@ -6,7 +6,13 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ONLY']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
+  'WHATSAPP_OWNER_JID',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -17,6 +23,9 @@ export const TELEGRAM_BOT_TOKEN =
   process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
 export const TELEGRAM_ONLY =
   (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+// WhatsApp number to send messages to (format: 5511999999999@s.whatsapp.net)
+export const WHATSAPP_OWNER_JID =
+  process.env.WHATSAPP_OWNER_JID || envConfig.WHATSAPP_OWNER_JID || '';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -81,7 +90,8 @@ export const MODEL_ALIASES: Record<string, string> = {
 export const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 // Matches: "usa sonnet", "use haiku", "usa opus", "modelo sonnet"
-export const MODEL_SWITCH_PATTERN = /^(?:usa|use|modelo)\s+(opus|sonnet|haiku)$/i;
+export const MODEL_SWITCH_PATTERN =
+  /^(?:usa|use|modelo)\s+(opus|sonnet|haiku)$/i;
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default

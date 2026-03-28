@@ -3,7 +3,13 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, SENDER_ALLOWLIST_PATH, TIMEZONE } from './config.js';
+import {
+  DATA_DIR,
+  GROUPS_DIR,
+  IPC_POLL_INTERVAL,
+  SENDER_ALLOWLIST_PATH,
+  TIMEZONE,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -12,7 +18,12 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
-  sendImage?: (jid: string, imagePath: string, caption?: string) => Promise<void>;
+  sendImage?: (
+    jid: string,
+    imagePath: string,
+    caption?: string,
+  ) => Promise<void>;
+  sendWhatsApp?: (jid: string, text: string, imagePath?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -37,7 +48,10 @@ function loadSendAllowlist(): Set<string> {
       return new Set(data.allowedJids || []);
     }
   } catch (err) {
-    logger.error({ err, path: SENDER_ALLOWLIST_PATH }, 'Failed to load send allowlist');
+    logger.error(
+      { err, path: SENDER_ALLOWLIST_PATH },
+      'Failed to load send allowlist',
+    );
   }
   return new Set();
 }
@@ -94,7 +108,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
-                const isOwnGroup = targetGroup && targetGroup.folder === sourceGroup;
+                const isOwnGroup =
+                  targetGroup && targetGroup.folder === sourceGroup;
 
                 let authorized = false;
                 if (isOwnGroup) {
@@ -125,19 +140,37 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     // Host: DATA_DIR/ipc/{sourceGroup}/input/file.jpg
                     let hostImagePath = data.imagePath;
                     if (data.imagePath.startsWith('/workspace/ipc/')) {
-                      const relativePath = data.imagePath.replace('/workspace/ipc/', '');
-                      hostImagePath = path.join(ipcBaseDir, sourceGroup, relativePath);
+                      const relativePath = data.imagePath.replace(
+                        '/workspace/ipc/',
+                        '',
+                      );
+                      hostImagePath = path.join(
+                        ipcBaseDir,
+                        sourceGroup,
+                        relativePath,
+                      );
                     }
 
                     if (!fs.existsSync(hostImagePath)) {
                       logger.error(
-                        { containerPath: data.imagePath, hostPath: hostImagePath },
+                        {
+                          containerPath: data.imagePath,
+                          hostPath: hostImagePath,
+                        },
                         'Image file not found on host',
                       );
                     } else {
-                      await deps.sendImage(data.chatJid, hostImagePath, data.text || undefined);
+                      await deps.sendImage(
+                        data.chatJid,
+                        hostImagePath,
+                        data.text || undefined,
+                      );
                       logger.info(
-                        { chatJid: data.chatJid, sourceGroup, imagePath: hostImagePath },
+                        {
+                          chatJid: data.chatJid,
+                          sourceGroup,
+                          imagePath: hostImagePath,
+                        },
                         'IPC image sent',
                       );
                     }
@@ -183,7 +216,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              await processTaskIpc(data, sourceGroup, isMain, deps, ipcBaseDir);
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
@@ -222,6 +255,10 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For whatsapp_send
+    to?: string;
+    text?: string;
+    imagePath?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -233,10 +270,37 @@ export async function processTaskIpc(
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
   deps: IpcDeps,
+  ipcBaseDir?: string,
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
 
   switch (data.type) {
+    case 'whatsapp_send':
+      // Only main group can send WhatsApp messages
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized whatsapp_send attempt blocked');
+        break;
+      }
+      if (!data.to || !data.text) {
+        logger.warn({ sourceGroup }, 'whatsapp_send missing "to" or "text" field');
+        break;
+      }
+      if (!deps.sendWhatsApp) {
+        logger.warn('whatsapp_send requested but WhatsApp sender not initialized');
+        break;
+      }
+      let hostImagePath = data.imagePath;
+      if (hostImagePath) {
+        if (hostImagePath.startsWith('/workspace/ipc/') && ipcBaseDir) {
+          hostImagePath = path.join(ipcBaseDir, sourceGroup, hostImagePath.replace('/workspace/ipc/', ''));
+        } else if (hostImagePath.startsWith('/workspace/group/')) {
+          hostImagePath = path.join(GROUPS_DIR, sourceGroup, hostImagePath.replace('/workspace/group/', ''));
+        }
+      }
+      await deps.sendWhatsApp(data.to, data.text, hostImagePath);
+      logger.info({ to: data.to, sourceGroup, hasImage: !!hostImagePath }, 'WhatsApp message sent via IPC');
+      break;
+
     case 'schedule_task':
       if (
         data.prompt &&

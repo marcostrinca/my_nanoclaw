@@ -12,10 +12,15 @@ import {
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_ONLY,
   TIMEZONE,
+  WHATSAPP_OWNER_JID,
   TRIGGER_PATTERN,
 } from './config.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import {
+  initWhatsAppSender,
+  sendWhatsAppMessage,
+} from './whatsapp-sender.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -399,19 +404,27 @@ async function startMessageLoop(): Promise<void> {
 
           // Model switch command: intercept before agent
           const modelMatch = groupMessages
-            .map(m => m.content.trim().match(MODEL_SWITCH_PATTERN))
+            .map((m) => m.content.trim().match(MODEL_SWITCH_PATTERN))
             .find(Boolean);
           if (modelMatch) {
             const alias = modelMatch[1].toLowerCase();
             const modelId = MODEL_ALIASES[alias];
-            group.containerConfig = { ...group.containerConfig, model: modelId };
+            group.containerConfig = {
+              ...group.containerConfig,
+              model: modelId,
+            };
             setRegisteredGroup(chatJid, group);
-            await channel.sendMessage(chatJid, `✅ Modelo: ${alias} (${modelId})`);
+            await channel.sendMessage(
+              chatJid,
+              `✅ Modelo: ${alias} (${modelId})`,
+            );
             continue;
           }
 
           // Stop command: kill running agent immediately
-          const isStopCommand = groupMessages.some(m => STOP_PATTERN.test(m.content.trim()));
+          const isStopCommand = groupMessages.some((m) =>
+            STOP_PATTERN.test(m.content.trim()),
+          );
           if (isStopCommand && queue.isActive(chatJid)) {
             queue.closeStdin(chatJid);
             await channel.sendMessage(chatJid, '⏹️ Agent stopped.');
@@ -508,6 +521,13 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start WhatsApp sender (send-only, auth stored in SQLite)
+  if (WHATSAPP_OWNER_JID) {
+    initWhatsAppSender().catch((err) =>
+      logger.error({ err }, 'WhatsApp sender failed to initialize'),
+    );
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -585,9 +605,11 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    sendWhatsApp: WHATSAPP_OWNER_JID ? sendWhatsAppMessage : undefined,
     sendImage: (jid, imagePath, caption) => {
       const channel = findChannel(channels, jid);
-      if (!channel || !channel.sendImage) throw new Error(`No channel with image support for JID: ${jid}`);
+      if (!channel || !channel.sendImage)
+        throw new Error(`No channel with image support for JID: ${jid}`);
       return channel.sendImage(jid, imagePath, caption);
     },
     registeredGroups: () => registeredGroups,

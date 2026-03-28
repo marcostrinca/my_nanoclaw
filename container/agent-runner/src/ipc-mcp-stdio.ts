@@ -62,15 +62,14 @@ server.tool(
   },
 );
 
+const WHATSAPP_OWNER_JID = process.env.WHATSAPP_OWNER_JID || '';
+
 server.tool(
   'send_whatsapp',
-  `Send a WhatsApp message (with optional image) to any JID. Main group only.
-Use this to interact with external WhatsApp contacts or bots for testing, QA, or automation.
-The image_path must be an absolute path accessible inside the container (e.g., /workspace/ipc/input/selfie.jpg).`,
+  `Send a WhatsApp message (optionally with an image) to the user. Main group only. Always delivers to the configured owner JID.`,
   {
-    jid: z.string().describe('Target WhatsApp JID (e.g., "551151940720@s.whatsapp.net")'),
     text: z.string().describe('Message text to send'),
-    image_path: z.string().optional().describe('Absolute path to an image file to send (optional)'),
+    image_path: z.string().optional().describe('Absolute path to an image file inside the container (e.g. /workspace/group/chart.png)'),
   },
   async (args) => {
     if (!isMain) {
@@ -80,22 +79,29 @@ The image_path must be an absolute path accessible inside the container (e.g., /
       };
     }
 
-    const data: Record<string, string | undefined> = {
-      type: 'message',
-      chatJid: args.jid,
+    if (!WHATSAPP_OWNER_JID) {
+      return {
+        content: [{ type: 'text' as const, text: 'WHATSAPP_OWNER_JID is not configured.' }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string> = {
+      type: 'whatsapp_send',
+      to: WHATSAPP_OWNER_JID,
       text: args.text,
-      groupFolder,
-      timestamp: new Date().toISOString(),
     };
 
     if (args.image_path) {
+      // Translate container path to host path
+      // Container: /workspace/group/... → host: groups/main/...
+      // Container: /workspace/ipc/... → host: data/ipc/main/...
       data.imagePath = args.image_path;
     }
 
-    writeIpcFile(MESSAGES_DIR, data);
+    writeIpcFile(TASKS_DIR, data);
 
-    const desc = args.image_path ? 'Message with image' : 'Message';
-    return { content: [{ type: 'text' as const, text: `${desc} sent to ${args.jid}.` }] };
+    return { content: [{ type: 'text' as const, text: 'WhatsApp message queued.' }] };
   },
 );
 

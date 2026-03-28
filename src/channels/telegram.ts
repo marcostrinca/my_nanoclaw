@@ -193,7 +193,10 @@ export class TelegramChannel implements Channel {
     });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', async (ctx) => {
-      logger.info({ fileId: ctx.message.voice.file_id }, 'Voice handler triggered');
+      logger.info(
+        { fileId: ctx.message.voice.file_id },
+        'Voice handler triggered',
+      );
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -222,7 +225,10 @@ export class TelegramChannel implements Channel {
       });
     });
     this.bot.on('message:audio', async (ctx) => {
-      logger.info({ fileId: ctx.message.audio.file_id }, 'Audio handler triggered');
+      logger.info(
+        { fileId: ctx.message.audio.file_id },
+        'Audio handler triggered',
+      );
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -258,9 +264,7 @@ export class TelegramChannel implements Channel {
       const emoji = ctx.message.sticker?.emoji || '';
       storeNonText(ctx, `[Sticker ${emoji}]`);
     });
-    this.bot.on('message:location', (ctx) =>
-      storeNonText(ctx, '[Location]'),
-    );
+    this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
     this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
     this.bot.catch((err) => {
@@ -306,7 +310,16 @@ export class TelegramChannel implements Channel {
       );
 
       // Transcribe with whisper-cli
-      const modelPath = '/usr/local/share/whisper-cpp/models/ggml-base.bin';
+      // Model path priority: ~/.nanoclaw-config/whisper-model > WHISPER_MODEL env > default
+      const configModelFile = path.join(os.homedir(), '.nanoclaw-config', 'whisper-model');
+      const modelPath = (() => {
+        try {
+          const p = fs.readFileSync(configModelFile, 'utf-8').trim();
+          if (p) return p;
+        } catch {}
+        return process.env.WHISPER_MODEL || '/usr/local/share/whisper-cpp/models/ggml-base.bin';
+      })();
+      logger.debug({ modelPath }, 'Using whisper model');
       const output = execSync(
         `whisper-cli -m "${modelPath}" --no-timestamps -l auto "${wavPath}"`,
         { encoding: 'utf-8', timeout: 60000 },

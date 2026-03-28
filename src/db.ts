@@ -82,6 +82,10 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS whatsapp_auth (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -630,6 +634,37 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       isMain: row.is_main === 1 ? true : undefined,
     };
+  }
+  return result;
+}
+
+// --- WhatsApp auth state (SQLite-backed, replaces file store) ---
+
+export function getWhatsAppAuthKey(key: string): string | undefined {
+  const row = db
+    .prepare('SELECT value FROM whatsapp_auth WHERE key = ?')
+    .get(key) as { value: string } | undefined;
+  return row?.value;
+}
+
+export function setWhatsAppAuthKey(key: string, value: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO whatsapp_auth (key, value) VALUES (?, ?)',
+  ).run(key, value);
+}
+
+export function deleteWhatsAppAuthKey(key: string): void {
+  db.prepare('DELETE FROM whatsapp_auth WHERE key = ?').run(key);
+}
+
+export function getWhatsAppAuthKeysByPrefix(
+  prefix: string,
+  ids: string[],
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const id of ids) {
+    const val = getWhatsAppAuthKey(`${prefix}/${id}`);
+    if (val !== undefined) result[id] = val;
   }
   return result;
 }
