@@ -14,6 +14,7 @@ const envConfig = readEnvFile([
   'TELEGRAM_ONLY',
   'WHATSAPP_OWNER_JID',
   'OLLAMA_ADMIN_TOOLS',
+  'SLACK_DEFAULT_CHANNEL',
   'TZ',
 ]);
 
@@ -29,6 +30,8 @@ export const TELEGRAM_ONLY =
 // WhatsApp number to send messages to (format: 5511999999999@s.whatsapp.net)
 export const WHATSAPP_OWNER_JID =
   process.env.WHATSAPP_OWNER_JID || envConfig.WHATSAPP_OWNER_JID || '';
+export const SLACK_DEFAULT_CHANNEL =
+  process.env.SLACK_DEFAULT_CHANNEL || envConfig.SLACK_DEFAULT_CHANNEL || '';
 export const OLLAMA_ADMIN_TOOLS =
   (process.env.OLLAMA_ADMIN_TOOLS || envConfig.OLLAMA_ADMIN_TOOLS) === 'true';
 export const POLL_INTERVAL = 2000;

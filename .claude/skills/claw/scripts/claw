@@ -46,9 +46,9 @@ def _find_nanoclaw_dir() -> Path:
     """
     if env := os.environ.get("NANOCLAW_DIR"):
         return Path(env).expanduser()
-    # If this script lives inside the NanoClaw tree (e.g. scripts/claw), walk up
+    # If this script lives inside the NanoClaw tree, walk up until we find it
     here = Path(__file__).resolve()
-    for parent in [here.parent, here.parent.parent]:
+    for parent in here.parents:
         if (parent / "store" / "messages.db").exists() or (parent / ".env").exists():
             return parent
     return Path.home() / "src" / "nanoclaw"
@@ -80,6 +80,20 @@ def detect_runtime(preference: str | None) -> str:
     sys.exit("error: neither 'container' nor 'docker' found. Install one or pass --runtime.")
 
 
+def read_claude_credentials() -> dict:
+    """Read OAuth token from ~/.claude/.credentials.json (refreshed by CLI)."""
+    creds_path = Path.home() / ".claude" / ".credentials.json"
+    try:
+        import json as _json
+        data = _json.loads(creds_path.read_text())
+        token = data.get("claudeAiOauth", {}).get("accessToken")
+        if token:
+            return {"CLAUDE_CODE_OAUTH_TOKEN": token}
+    except (FileNotFoundError, KeyError, ValueError):
+        pass
+    return {}
+
+
 def read_secrets(env_file: Path) -> dict:
     secrets = {}
     if not env_file.exists():
@@ -93,6 +107,9 @@ def read_secrets(env_file: Path) -> dict:
             key = key.strip()
             if key in SECRET_KEYS:
                 secrets[key] = val.strip()
+    # If no OAuth token in .env, try ~/.claude/.credentials.json
+    if "CLAUDE_CODE_OAUTH_TOKEN" not in secrets and "ANTHROPIC_API_KEY" not in secrets:
+        secrets.update(read_claude_credentials())
     return secrets
 
 

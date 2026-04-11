@@ -3,7 +3,7 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies for Chromium + TTS
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -25,7 +25,33 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     sqlite3 \
+    ffmpeg \
+    python3-pip \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
+
+# --- TTS: Piper (pt-BR) ---
+RUN mkdir -p /usr/local/share/tts/piper && \
+    curl -sL https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz | \
+    tar xz -C /usr/local/share/tts/piper --strip-components=1 && \
+    mkdir -p /usr/local/share/tts/voices && \
+    curl -sL -o /usr/local/share/tts/voices/pt_BR-faber-medium.onnx \
+      "https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx" && \
+    curl -sL -o /usr/local/share/tts/voices/pt_BR-faber-medium.onnx.json \
+      "https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx.json"
+
+# --- TTS: Kokoro (en/ja) ---
+RUN pip3 install --break-system-packages --no-cache-dir kokoro-onnx soundfile && \
+    mkdir -p /usr/local/share/tts/kokoro && \
+    curl -sL -o /usr/local/share/tts/kokoro/kokoro-v1.0.onnx \
+      "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx" && \
+    curl -sL -o /usr/local/share/tts/kokoro/voices-v1.0.bin \
+      "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin"
+
+# --- TTS unified script ---
+COPY tts.py /usr/local/share/tts/tts.py
+RUN chmod +x /usr/local/share/tts/tts.py && \
+    ln -s /usr/local/share/tts/tts.py /usr/local/bin/yume-tts
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

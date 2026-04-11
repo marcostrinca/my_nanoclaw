@@ -20,6 +20,8 @@ import {
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import { TelegramChannel } from './channels/telegram.js';
+import './channels/index.js';
+import { getRegisteredChannelNames, getChannelFactory } from './channels/registry.js';
 import { initWhatsAppSender, sendWhatsAppMessage } from './whatsapp-sender.js';
 import {
   ContainerOutput,
@@ -65,7 +67,11 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { extractSessionCommand, handleSessionCommand, isSessionCommandAllowed } from './session-commands.js';
+import {
+  extractSessionCommand,
+  handleSessionCommand,
+  isSessionCommandAllowed,
+} from './session-commands.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -228,18 +234,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     timezone: TIMEZONE,
     deps: {
       sendMessage: (text) => channel.sendMessage(chatJid, text),
-      setTyping: (typing) => channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
-      runAgent: (prompt, onOutput) => runAgent(group, prompt, chatJid, onOutput),
+      setTyping: (typing) =>
+        channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
+      runAgent: (prompt, onOutput) =>
+        runAgent(group, prompt, chatJid, onOutput),
       closeStdin: () => queue.closeStdin(chatJid),
-      advanceCursor: (ts) => { lastAgentTimestamp[chatJid] = ts; saveState(); },
+      advanceCursor: (ts) => {
+        lastAgentTimestamp[chatJid] = ts;
+        saveState();
+      },
       formatMessages,
       canSenderInteract: (msg) => {
-        const hasTrigger = getTriggerPattern(group.trigger).test(msg.content.trim());
+        const hasTrigger = getTriggerPattern(group.trigger).test(
+          msg.content.trim(),
+        );
         const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
-        return isMainGroup || !reqTrigger || (hasTrigger && (
-          msg.is_from_me ||
-          isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())
-        ));
+        return (
+          isMainGroup ||
+          !reqTrigger ||
+          (hasTrigger &&
+            (msg.is_from_me ||
+              isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())))
+        );
       },
     },
   });
@@ -536,14 +552,23 @@ async function startMessageLoop(): Promise<void> {
           // --- Session command interception (message loop) ---
           // Scan ALL messages in the batch for a session command.
           const loopCmdMsg = groupMessages.find(
-            (m) => extractSessionCommand(m.content, getTriggerPattern(group.trigger)) !== null,
+            (m) =>
+              extractSessionCommand(
+                m.content,
+                getTriggerPattern(group.trigger),
+              ) !== null,
           );
 
           if (loopCmdMsg) {
             // Only close active container if the sender is authorized — otherwise an
             // untrusted user could kill in-flight work by sending /compact (DoS).
             // closeStdin no-ops internally when no container is active.
-            if (isSessionCommandAllowed(isMainGroup, loopCmdMsg.is_from_me === true)) {
+            if (
+              isSessionCommandAllowed(
+                isMainGroup,
+                loopCmdMsg.is_from_me === true,
+              )
+            ) {
               queue.closeStdin(chatJid);
             }
             // Enqueue so processGroupMessages handles auth + cursor advancement.
@@ -757,6 +782,18 @@ async function main(): Promise<void> {
     await telegram.connect();
   }
 
+  // Auto-register channels from the registry (e.g. Slack)
+  for (const name of getRegisteredChannelNames()) {
+    const factory = getChannelFactory(name);
+    if (!factory) continue;
+    const ch = factory(channelOpts);
+    if (ch) {
+      channels.push(ch);
+      await ch.connect();
+      logger.info({ channel: name }, 'Channel connected via registry');
+    }
+  }
+
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
@@ -788,6 +825,17 @@ async function main(): Promise<void> {
       return channel.sendMessage(jid, text);
     },
     sendWhatsApp: WHATSAPP_OWNER_JID ? sendWhatsAppMessage : undefined,
+    sendSlack: (jid: string, text: string) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No Slack channel for JID: ${jid}`);
+      return channel.sendMessage(jid, text);
+    },
+    sendVoice: (jid: string, audioPath: string) => {
+      const channel = findChannel(channels, jid);
+      if (!channel || !channel.sendVoice)
+        throw new Error(`No channel with voice support for JID: ${jid}`);
+      return channel.sendVoice(jid, audioPath);
+    },
     sendImage: (jid, imagePath, caption) => {
       const channel = findChannel(channels, jid);
       if (!channel || !channel.sendImage)

@@ -28,6 +28,8 @@ export interface IpcDeps {
     text: string,
     imagePath?: string,
   ) => Promise<void>;
+  sendSlack?: (jid: string, text: string) => Promise<void>;
+  sendVoice?: (jid: string, audioPath: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -139,7 +141,50 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 }
 
                 if (authorized) {
-                  if (data.imagePath && deps.sendImage) {
+                  if (data.voicePath && deps.sendVoice) {
+                    // Translate container path to host path
+                    let hostVoicePath = data.voicePath;
+                    if (data.voicePath.startsWith('/workspace/ipc/')) {
+                      const relativePath = data.voicePath.replace(
+                        '/workspace/ipc/',
+                        '',
+                      );
+                      hostVoicePath = path.join(
+                        ipcBaseDir,
+                        sourceGroup,
+                        relativePath,
+                      );
+                    } else if (data.voicePath.startsWith('/workspace/group/')) {
+                      hostVoicePath = path.join(
+                        GROUPS_DIR,
+                        sourceGroup,
+                        data.voicePath.replace('/workspace/group/', ''),
+                      );
+                    }
+
+                    if (!fs.existsSync(hostVoicePath)) {
+                      logger.error(
+                        {
+                          containerPath: data.voicePath,
+                          hostPath: hostVoicePath,
+                        },
+                        'Voice file not found on host',
+                      );
+                    } else {
+                      await deps.sendVoice(
+                        data.chatJid,
+                        hostVoicePath,
+                      );
+                      logger.info(
+                        {
+                          chatJid: data.chatJid,
+                          sourceGroup,
+                          voicePath: hostVoicePath,
+                        },
+                        'IPC voice sent',
+                      );
+                    }
+                  } else if (data.imagePath && deps.sendImage) {
                     // Translate container path to host path
                     // Container: /workspace/ipc/input/file.jpg
                     // Host: DATA_DIR/ipc/{sourceGroup}/input/file.jpg
@@ -323,6 +368,32 @@ export async function processTaskIpc(
       logger.info(
         { to: data.to, sourceGroup, hasImage: !!hostImagePath },
         'WhatsApp message sent via IPC',
+      );
+      break;
+
+    case 'slack_send':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized slack_send attempt blocked',
+        );
+        break;
+      }
+      if (!data.to || !data.text) {
+        logger.warn(
+          { sourceGroup },
+          'slack_send missing "to" or "text" field',
+        );
+        break;
+      }
+      if (!deps.sendSlack) {
+        logger.warn('slack_send requested but Slack channel not initialized');
+        break;
+      }
+      await deps.sendSlack(data.to, data.text);
+      logger.info(
+        { to: data.to, sourceGroup },
+        'Slack message sent via IPC',
       );
       break;
 

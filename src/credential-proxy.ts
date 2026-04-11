@@ -9,10 +9,17 @@
  *             API key via /api/oauth/claude_cli/create_api_key.
  *             Proxy injects real OAuth token on that exchange request;
  *             subsequent requests carry the temp key which is valid as-is.
+ *
+ * OAuth tokens are read from ~/.claude/.credentials.json on each request,
+ * so the proxy always uses the latest token refreshed by the Claude CLI.
+ * Falls back to .env if the credentials file doesn't exist.
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
@@ -21,6 +28,22 @@ export type AuthMode = 'api-key' | 'oauth';
 
 export interface ProxyConfig {
   authMode: AuthMode;
+}
+
+const CLAUDE_CREDENTIALS_PATH = path.join(
+  os.homedir(),
+  '.claude',
+  '.credentials.json',
+);
+
+/** Read the current OAuth access token from ~/.claude/.credentials.json. */
+function readClaudeCredentials(): string | undefined {
+  try {
+    const data = JSON.parse(fs.readFileSync(CLAUDE_CREDENTIALS_PATH, 'utf-8'));
+    return data?.claudeAiOauth?.accessToken;
+  } catch {
+    return undefined;
+  }
 }
 
 export function startCredentialProxy(
@@ -35,8 +58,6 @@ export function startCredentialProxy(
   ]);
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
@@ -71,8 +92,13 @@ export function startCredentialProxy(
           // only when the container actually sends an Authorization header
           // (exchange request + auth probes). Post-exchange requests use
           // x-api-key only, so they pass through without token injection.
+          // Read token fresh each request so we pick up CLI refreshes.
           if (headers['authorization']) {
             delete headers['authorization'];
+            const oauthToken =
+              readClaudeCredentials() ||
+              secrets.CLAUDE_CODE_OAUTH_TOKEN ||
+              secrets.ANTHROPIC_AUTH_TOKEN;
             if (oauthToken) {
               headers['authorization'] = `Bearer ${oauthToken}`;
             }
@@ -122,4 +148,11 @@ export function startCredentialProxy(
 export function detectAuthMode(): AuthMode {
   const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
   return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+}
+
+/** Check if valid OAuth credentials are available from any source. */
+export function hasOAuthCredentials(): boolean {
+  if (readClaudeCredentials()) return true;
+  const secrets = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN']);
+  return !!(secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN);
 }

@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { Bot } from 'grammy';
+import { Bot, InputFile } from 'grammy';
 
 import { ASSISTANT_NAME, DATA_DIR, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
@@ -329,7 +329,7 @@ export class TelegramChannel implements Channel {
       logger.debug({ modelPath }, 'Using whisper model');
       const output = execSync(
         `whisper-cli -m "${modelPath}" --no-timestamps -l auto "${wavPath}"`,
-        { encoding: 'utf-8', timeout: 60000 },
+        { encoding: 'utf-8', timeout: 180000 },
       ).trim();
 
       if (output) {
@@ -372,6 +372,33 @@ export class TelegramChannel implements Channel {
       logger.info({ jid, length: text.length }, 'Telegram message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
+    }
+  }
+
+  async sendVoice(jid: string, audioPath: string): Promise<void> {
+    if (!this.bot) {
+      logger.warn('Telegram bot not initialized');
+      return;
+    }
+
+    try {
+      const numericId = jid.replace(/^tg:/, '');
+
+      // Convert to OGG/Opus if not already (Telegram voice requires this format)
+      let sendPath = audioPath;
+      if (!audioPath.endsWith('.ogg') && !audioPath.endsWith('.oga')) {
+        const oggPath = audioPath.replace(/\.[^.]+$/, '.ogg');
+        execSync(
+          `ffmpeg -y -i "${audioPath}" -c:a libopus -b:a 64k "${oggPath}"`,
+          { timeout: 30000 },
+        );
+        sendPath = oggPath;
+      }
+
+      await this.bot.api.sendVoice(numericId, new InputFile(sendPath));
+      logger.info({ jid, audioPath }, 'Telegram voice sent');
+    } catch (err) {
+      logger.error({ jid, audioPath, err }, 'Failed to send Telegram voice');
     }
   }
 

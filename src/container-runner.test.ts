@@ -16,6 +16,7 @@ vi.mock('./config.js', () => ({
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   OLLAMA_ADMIN_TOOLS: false,
+  SLACK_DEFAULT_CHANNEL: '',
   STORE_DIR: '/tmp/nanoclaw-test-store',
   TIMEZONE: 'America/Los_Angeles',
   WHATSAPP_OWNER_JID: '',

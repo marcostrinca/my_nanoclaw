@@ -30,6 +30,7 @@ interface ContainerInput {
   assistantName?: string;
   model?: string;
   script?: string;
+  secrets?: Record<string, string>;
 }
 
 interface ContainerOutput {
@@ -754,8 +755,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
-  // No real secrets exist in the container environment.
+  // Credentials: normally injected by the host's credential proxy via ANTHROPIC_BASE_URL.
+  // When running standalone (e.g. claw CLI), secrets may arrive in the payload instead.
+  if (containerInput.secrets) {
+    for (const [key, val] of Object.entries(containerInput.secrets)) {
+      if (val) process.env[key] = val;
+    }
+    log(`Injected secrets from payload: ${Object.keys(containerInput.secrets).join(', ')}`);
+  }
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));

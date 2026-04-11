@@ -110,6 +110,100 @@ server.tool(
   },
 );
 
+const SLACK_DEFAULT_CHANNEL = process.env.SLACK_DEFAULT_CHANNEL || '';
+
+server.tool(
+  'send_slack',
+  `Send a Slack message to a channel or user. Main group only. If no channel is specified, delivers to the default Slack channel.`,
+  {
+    text: z.string().describe('Message text to send'),
+    channel: z
+      .string()
+      .optional()
+      .describe(
+        'Target Slack channel JID (e.g. "slack:C0123456789"). Defaults to SLACK_DEFAULT_CHANNEL.',
+      ),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can use send_slack.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const target = args.channel || SLACK_DEFAULT_CHANNEL;
+    if (!target) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'No target channel specified and SLACK_DEFAULT_CHANNEL is not configured.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string> = {
+      type: 'slack_send',
+      to: target,
+      text: args.text,
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Slack message queued to ${target}.` }],
+    };
+  },
+);
+
+server.tool(
+  'send_voice',
+  `Send an audio file as a voice message to the current chat. First generate the audio (e.g. via OpenAI TTS with curl, or any other method), save it to /workspace/group/, then call this tool with the file path.`,
+  {
+    audio_path: z
+      .string()
+      .describe(
+        'Absolute path to the audio file inside the container (e.g. /workspace/group/voice.mp3). Supports mp3, ogg, wav — will be converted to Telegram voice format by the host.',
+      ),
+  },
+  async (args) => {
+    const { existsSync } = await import('fs');
+    if (!existsSync(args.audio_path)) {
+      return {
+        content: [
+          { type: 'text' as const, text: `Audio file not found: ${args.audio_path}` },
+        ],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string> = {
+      type: 'message',
+      chatJid,
+      text: '',
+      voicePath: args.audio_path,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [
+        { type: 'text' as const, text: 'Voice message queued for delivery.' },
+      ],
+    };
+  },
+);
+
 server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.

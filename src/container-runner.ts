@@ -16,6 +16,7 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   OLLAMA_ADMIN_TOOLS,
+  SLACK_DEFAULT_CHANNEL,
   STORE_DIR,
   TIMEZONE,
   WHATSAPP_OWNER_JID,
@@ -292,6 +293,11 @@ function buildContainerArgs(
   // Pass WhatsApp owner JID so the MCP server knows the default destination
   if (WHATSAPP_OWNER_JID) {
     args.push('-e', `WHATSAPP_OWNER_JID=${WHATSAPP_OWNER_JID}`);
+  }
+
+  // Pass Slack default channel so MCP server knows the default destination
+  if (SLACK_DEFAULT_CHANNEL) {
+    args.push('-e', `SLACK_DEFAULT_CHANNEL=${SLACK_DEFAULT_CHANNEL}`);
   }
 
   // Forward Ollama admin tools flag if enabled

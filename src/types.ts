@@ -94,6 +94,8 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: send an image with optional caption
   sendImage?(jid: string, imagePath: string, caption?: string): Promise<void>;
+  // Optional: send a voice/audio file
+  sendVoice?(jid: string, audioPath: string): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
