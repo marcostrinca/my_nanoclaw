@@ -763,7 +763,10 @@ async function main(): Promise<void> {
     }
     log(`Injected secrets from payload: ${Object.keys(containerInput.secrets).join(', ')}`);
   }
-  const sdkEnv: Record<string, string | undefined> = { ...process.env };
+  const sdkEnv: Record<string, string | undefined> = {
+    ...process.env,
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '165000',
+  };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
