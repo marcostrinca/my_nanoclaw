@@ -153,6 +153,9 @@ export function detectAuthMode(): AuthMode {
 /** Check if valid OAuth credentials are available from any source. */
 export function hasOAuthCredentials(): boolean {
   if (readClaudeCredentials()) return true;
-  const secrets = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN']);
+  const secrets = readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN',
+  ]);
   return !!(secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN);
 }

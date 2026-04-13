@@ -256,9 +256,46 @@ export class TelegramChannel implements Channel {
         is_from_me: false,
       });
     });
-    this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+    this.bot.on('message:document', async (ctx) => {
+      const doc = ctx.message.document;
+      if (!doc) return;
+      const name = doc.file_name || 'file';
+      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      let content = `[Document: ${name}]${caption}`;
+
+      try {
+        const file = await ctx.api.getFile(doc.file_id);
+        const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const resp = await fetch(url);
+        const buffer = Buffer.from(await resp.arrayBuffer());
+
+        const inputDir = path.join(DATA_DIR, 'ipc', group.folder, 'input');
+        fs.mkdirSync(inputDir, { recursive: true });
+        const filename = `doc-${Date.now()}-${name}`;
+        fs.writeFileSync(path.join(inputDir, filename), buffer);
+
+        content = `[Document: /workspace/ipc/input/${filename}]${caption}`;
+        logger.info({ filename }, 'Document downloaded for agent');
+      } catch (err) {
+        logger.error({ err }, 'Document download failed');
+      }
+
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName = ctx.from?.first_name || ctx.from?.username || ctx.from?.id?.toString() || 'Unknown';
+      this.opts.onChatMetadata(chatJid, timestamp);
+      this.opts.onMessage(chatJid, {
+        id: ctx.message.message_id.toString(),
+        chat_jid: chatJid,
+        sender: ctx.from?.id?.toString() || '',
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+      });
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';

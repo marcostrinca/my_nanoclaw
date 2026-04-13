@@ -21,7 +21,10 @@ import {
 import { startCredentialProxy } from './credential-proxy.js';
 import { TelegramChannel } from './channels/telegram.js';
 import './channels/index.js';
-import { getRegisteredChannelNames, getChannelFactory } from './channels/registry.js';
+import {
+  getRegisteredChannelNames,
+  getChannelFactory,
+} from './channels/registry.js';
 import { initWhatsAppSender, sendWhatsAppMessage } from './whatsapp-sender.js';
 import {
   ContainerOutput,

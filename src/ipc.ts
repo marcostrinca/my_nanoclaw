@@ -171,10 +171,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                         'Voice file not found on host',
                       );
                     } else {
-                      await deps.sendVoice(
-                        data.chatJid,
-                        hostVoicePath,
-                      );
+                      await deps.sendVoice(data.chatJid, hostVoicePath);
                       logger.info(
                         {
                           chatJid: data.chatJid,
@@ -373,17 +370,11 @@ export async function processTaskIpc(
 
     case 'slack_send':
       if (!isMain) {
-        logger.warn(
-          { sourceGroup },
-          'Unauthorized slack_send attempt blocked',
-        );
+        logger.warn({ sourceGroup }, 'Unauthorized slack_send attempt blocked');
         break;
       }
       if (!data.to || !data.text) {
-        logger.warn(
-          { sourceGroup },
-          'slack_send missing "to" or "text" field',
-        );
+        logger.warn({ sourceGroup }, 'slack_send missing "to" or "text" field');
         break;
       }
       if (!deps.sendSlack) {
@@ -391,10 +382,7 @@ export async function processTaskIpc(
         break;
       }
       await deps.sendSlack(data.to, data.text);
-      logger.info(
-        { to: data.to, sourceGroup },
-        'Slack message sent via IPC',
-      );
+      logger.info({ to: data.to, sourceGroup }, 'Slack message sent via IPC');
       break;
 
     case 'schedule_task':
