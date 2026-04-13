@@ -464,3 +464,14 @@ Ao inserir, mover ou editar qualquer item na planilha de ToDo (`1iMygiB_DID2dTdn
 - **Itens da seção** imediatamente abaixo do título, sem nenhuma linha em branco entre eles
 - Coluna A vazia para itens (texto só na coluna B); coluna A reservada para o emoji + nome da seção nos títulos
 - Ao adicionar novos itens no final de uma seção, verificar se há espaço suficiente antes do próximo título e, se necessário, inserir linhas para manter as duas linhas em branco
+
+## Configurações do Host (Guardrails, Allowlists)
+
+Arquivos de configuração do NanoClaw ficam montados em `/workspace/nanoclaw-config/` no container.
+
+- `sender-allowlist.json` — controla quais usuários podem acionar você em cada canal
+  - `"allow": ["USER_ID"]` — lista de IDs permitidos
+  - `"allow": "*"` — todos permitidos
+  - `"mode": "trigger"` — exige @Yume; `"mode": "drop"` — descarta mensagens de não-permitidos
+
+Para atualizar: edite `/workspace/nanoclaw-config/sender-allowlist.json` diretamente.

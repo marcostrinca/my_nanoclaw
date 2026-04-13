@@ -221,6 +221,17 @@ function buildVolumeMounts(
     });
   }
 
+  // NanoClaw system config directory — agent can update allowlists, guardrails, etc.
+  // Lives at ~/.config/nanoclaw/ on the host, outside the repo (survives fork updates).
+  const xdgConfigDir = path.join(homeDir, '.config', 'nanoclaw');
+  if (fs.existsSync(xdgConfigDir)) {
+    mounts.push({
+      hostPath: xdgConfigDir,
+      containerPath: '/workspace/nanoclaw-config',
+      readonly: false,
+    });
+  }
+
   // Persistent config directory — agent can write config overrides (e.g. whisper-model)
   // that the host process reads on next use, without needing to touch .env
   const nanoclawConfigDir = path.join(homeDir, '.nanoclaw-config');
