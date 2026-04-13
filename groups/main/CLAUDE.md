@@ -70,8 +70,6 @@ echo "{\"type\":\"whatsapp_send\",\"to\":\"$WHATSAPP_OWNER_JID\",\"text\":\"Sua 
   > /workspace/ipc/tasks/wa_$(date +%s%N).json
 ```
 
-The user's WhatsApp JID is `5511972182222-1567362981@g.us` (grupo "Eu mesmo").
-
 Use WhatsApp for urgent notifications the user should see even when not in Telegram. Don't send unless the user explicitly asks or the situation clearly warrants it.
 
 ## Message Formatting
