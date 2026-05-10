@@ -5,6 +5,10 @@
  * Used by Discord, Slack, and other Chat SDK-supported platforms.
  */
 import http from 'http';
+import { execFileSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import {
   Chat,
@@ -24,6 +28,77 @@ import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
+
+const AUDIO_MIME_PREFIXES = ['audio/'];
+const AUDIO_EXTS = ['.mp3', '.ogg', '.m4a', '.wav', '.aac', '.opus', '.webm', '.mp4'];
+
+/**
+ * Transcribe an audio buffer using whisper-cli on the host. Audio attachments
+ * (voice messages, mp3/ogg/m4a/etc.) are downloaded, converted to 16kHz mono
+ * WAV via ffmpeg, and transcribed. Result is prepended to the message as
+ * `[Áudio: <text>]`. Model path is read from
+ * `~/.nanoclaw-config/whisper-model` (defaults to ggml-base.bin). Timeout
+ * set to 600s to accommodate larger models on low-core-count hosts.
+ * Returns null on any error.
+ */
+function transcribeAudio(data: Buffer, mimeType: string): string | null {
+  const configModelPath = path.join(os.homedir(), '.nanoclaw-config', 'whisper-model');
+  let modelPath = '/usr/local/share/whisper-cpp/models/ggml-base.bin';
+  try {
+    const configured = fs.readFileSync(configModelPath, 'utf8').trim();
+    if (configured && fs.existsSync(configured)) modelPath = configured;
+  } catch {
+    /* use default */
+  }
+
+  const tmp = os.tmpdir();
+  const id = `nclaw-audio-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const ext = mimeType.includes('ogg')
+    ? '.ogg'
+    : mimeType.includes('mp3') || mimeType.includes('mpeg')
+      ? '.mp3'
+      : mimeType.includes('m4a') || mimeType.includes('mp4')
+        ? '.m4a'
+        : mimeType.includes('webm')
+          ? '.webm'
+          : '.audio';
+  const inputPath = path.join(tmp, `${id}${ext}`);
+  const wavPath = path.join(tmp, `${id}.wav`);
+
+  try {
+    fs.writeFileSync(inputPath, data);
+    execFileSync('ffmpeg', ['-i', inputPath, '-ar', '16000', '-ac', '1', '-y', wavPath], {
+      stdio: 'pipe',
+      timeout: 30_000,
+    });
+    const out = execFileSync(
+      'whisper-cli',
+      ['-m', modelPath, '-f', wavPath, '--output-txt', '--no-timestamps', '-l', 'pt'],
+      { stdio: 'pipe', timeout: 600_000 },
+    );
+    const text = out.toString('utf8').trim();
+    return text || null;
+  } catch (err) {
+    log.warn('Audio transcription failed', { err });
+    return null;
+  } finally {
+    try {
+      fs.unlinkSync(inputPath);
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(wavPath);
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(`${wavPath}.txt`);
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 /** Adapter with optional gateway support (e.g., Discord). */
 interface GatewayAdapter extends Adapter {
@@ -152,6 +227,20 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           try {
             const buffer = await att.fetchData();
             entry.data = buffer.toString('base64');
+
+            const mime = att.mimeType ?? '';
+            const name = att.name ?? '';
+            const isAudio =
+              AUDIO_MIME_PREFIXES.some((p) => mime.startsWith(p)) ||
+              AUDIO_EXTS.some((e) => name.toLowerCase().endsWith(e));
+            if (isAudio) {
+              const transcript = transcribeAudio(buffer, mime || 'audio/ogg');
+              if (transcript) {
+                const existing = (serialized.text as string) ?? '';
+                serialized.text = existing ? `[Áudio: ${transcript}]\n${existing}` : `[Áudio: ${transcript}]`;
+                log.info('Audio transcribed', { chars: transcript.length, adapter: adapter.name });
+              }
+            }
           } catch (err) {
             log.warn('Failed to download attachment', { type: att.type, err });
           }
