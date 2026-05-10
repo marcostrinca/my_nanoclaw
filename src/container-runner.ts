@@ -14,7 +14,9 @@ import {
   CONTAINER_IMAGE_BASE,
   CONTAINER_INSTALL_LABEL,
   DATA_DIR,
+  GH_TOKEN,
   GROUPS_DIR,
+  HOME_DIR,
   ONECLI_API_KEY,
   ONECLI_URL,
   TIMEZONE,
@@ -154,7 +156,10 @@ async function spawnContainer(session: Session): Promise<void> {
   // immediate kill before the new container touches the file itself.
   fs.rmSync(heartbeatPath(agentGroup.id, session.id), { force: true });
 
-  const container = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  // GH_TOKEN is forwarded via env (not argv) so it stays out of ps aux.
+  // See the matching `args.push('-e', 'GH_TOKEN')` (no value) below.
+  const spawnEnv = GH_TOKEN ? { ...process.env, GH_TOKEN } : process.env;
+  const container = spawn(CONTAINER_RUNTIME_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'], env: spawnEnv });
 
   activeContainers.set(session.id, { process: container, containerName });
   markContainerRunning(session.id);
@@ -306,9 +311,52 @@ function buildMounts(
     mounts.push({ hostPath: sharedClaudeMd, containerPath: '/app/CLAUDE.md', readonly: true });
   }
 
+  // Seed/refresh OAuth credentials into the per-group .claude-shared so the
+  // claude binary inside the container can authenticate without OneCLI.
+  // Copy when host's ~/.claude/.credentials.json is newer than the existing
+  // per-group copy (or doesn't exist yet).
+  const claudeCredsSrc = path.join(HOME_DIR, '.claude', '.credentials.json');
+  const claudeCredsDst = path.join(claudeDir, '.credentials.json');
+  if (fs.existsSync(claudeCredsSrc)) {
+    let shouldCopyCreds = !fs.existsSync(claudeCredsDst);
+    if (!shouldCopyCreds) {
+      try {
+        const src = JSON.parse(fs.readFileSync(claudeCredsSrc, 'utf8'));
+        const dst = JSON.parse(fs.readFileSync(claudeCredsDst, 'utf8'));
+        const srcExp = src?.claudeAiOauth?.expiresAt ?? 0;
+        const dstExp = dst?.claudeAiOauth?.expiresAt ?? 0;
+        if (srcExp > dstExp) shouldCopyCreds = true;
+      } catch {
+        shouldCopyCreds = true;
+      }
+    }
+    if (shouldCopyCreds) fs.copyFileSync(claudeCredsSrc, claudeCredsDst);
+  }
+
   // Per-group .claude-shared at /home/node/.claude (Claude state, settings,
   // skill symlinks)
   mounts.push({ hostPath: claudeDir, containerPath: '/home/node/.claude', readonly: false });
+
+  // Seed/refresh ~/.claude.json — the Claude Code top-level config (distinct
+  // from the .claude/ directory). Without it the SDK aborts on spawn with
+  // "Claude configuration file not found". Mount the per-group copy at
+  // /home/node/.claude.json so claude can persist its own state changes.
+  const claudeJsonSrc = path.join(HOME_DIR, '.claude.json');
+  const claudeJsonDst = path.join(claudeDir, '.claude.json');
+  if (fs.existsSync(claudeJsonSrc)) {
+    let shouldCopyJson = !fs.existsSync(claudeJsonDst);
+    if (!shouldCopyJson) {
+      try {
+        const srcStat = fs.statSync(claudeJsonSrc);
+        const dstStat = fs.statSync(claudeJsonDst);
+        if (srcStat.mtimeMs > dstStat.mtimeMs) shouldCopyJson = true;
+      } catch {
+        shouldCopyJson = true;
+      }
+    }
+    if (shouldCopyJson) fs.copyFileSync(claudeJsonSrc, claudeJsonDst);
+    mounts.push({ hostPath: claudeJsonDst, containerPath: '/home/node/.claude.json', readonly: false });
+  }
 
   // Shared agent-runner source — read-only, same code for all groups.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
@@ -418,19 +466,33 @@ async function buildContainerArgs(
     }
   }
 
+  // GH_TOKEN passthrough — value forwarded via spawn env (see spawnContainer)
+  // so it doesn't leak via /proc/<pid>/cmdline. `-e <NAME>` (no =value) tells
+  // docker to read the value from its own environment.
+  if (GH_TOKEN) args.push('-e', 'GH_TOKEN');
+
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
-  // are routed through the agent vault for credential injection. Treated as
-  // a transient hard failure: if we can't wire the gateway, we don't spawn.
-  // The caller (router or host-sweep) catches the throw, leaves the inbound
-  // message pending, and the next sweep tick retries.
-  if (agentIdentifier) {
-    await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+  // are routed through the agent vault for credential injection. Optional:
+  // installs that don't configure OneCLI rely on per-group OAuth credentials
+  // seeded into .claude-shared instead. Skip the entire OneCLI flow when
+  // ONECLI_URL / ONECLI_API_KEY are not set — the SDK defaults to the cloud
+  // endpoint (app.onecli.sh) and would 401 on every spawn otherwise.
+  const onecliConfigured = !!ONECLI_URL && !!ONECLI_API_KEY;
+  if (onecliConfigured) {
+    try {
+      if (agentIdentifier) {
+        await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+      }
+      const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
+      if (!onecliApplied) {
+        log.warn('OneCLI gateway not applied — container will use OAuth credentials only', { containerName });
+      } else {
+        log.info('OneCLI gateway applied', { containerName });
+      }
+    } catch (err) {
+      log.warn('OneCLI gateway error — container will use OAuth credentials only', { containerName, err });
+    }
   }
-  const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
-  if (!onecliApplied) {
-    throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
-  }
-  log.info('OneCLI gateway applied', { containerName });
 
   // Host gateway
   args.push(...hostGatewayArgs());
