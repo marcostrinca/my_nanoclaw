@@ -14,6 +14,7 @@ import {
   CONTAINER_IMAGE_BASE,
   CONTAINER_INSTALL_LABEL,
   DATA_DIR,
+  GDRIVE_SHARED_DRIVES,
   GH_TOKEN,
   GROUPS_DIR,
   HOME_DIR,
@@ -378,6 +379,23 @@ function buildMounts(
   if (providerContribution.mounts) {
     mounts.push(...providerContribution.mounts);
   }
+
+  // Google Drive credentials — OAuth keys + cached refresh token live on the
+  // host so they survive container restarts and aren't duplicated per agent
+  // group. `.gdrive-mcp-team` variant when GDRIVE_SHARED_DRIVES is true.
+  const gdriveDirName = GDRIVE_SHARED_DRIVES ? '.gdrive-mcp-team' : '.gdrive-mcp';
+  const gdriveDir = path.join(HOME_DIR, gdriveDirName);
+  if (fs.existsSync(gdriveDir)) {
+    mounts.push({ hostPath: gdriveDir, containerPath: '/home/node/.gdrive-mcp', readonly: false });
+  }
+
+  // Agent-editable runtime config dir — whisper model path, activity_log.db
+  // (scheduled tasks/per-spawn log persisted by MCP tools), other per-host
+  // mutable state that should survive container rebuilds. RW because some
+  // tools (activity-log MCP) write here.
+  const nanoClawConfigDir = path.join(HOME_DIR, '.nanoclaw-config');
+  fs.mkdirSync(nanoClawConfigDir, { recursive: true });
+  mounts.push({ hostPath: nanoClawConfigDir, containerPath: '/workspace/nanoclaw-config', readonly: false });
 
   return mounts;
 }
