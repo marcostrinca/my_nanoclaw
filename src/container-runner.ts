@@ -471,6 +471,14 @@ async function buildContainerArgs(
   // docker to read the value from its own environment.
   if (GH_TOKEN) args.push('-e', 'GH_TOKEN');
 
+  // GPU passthrough — opt-in by host capability. When the host has an NVIDIA
+  // GPU (and nvidia-container-toolkit is installed), forward all GPUs into
+  // the container. Agents can then use CUDA / nvidia-smi for tracking,
+  // transcription, training etc. No-op on hosts without /dev/nvidia0.
+  if (fs.existsSync('/dev/nvidia0')) {
+    args.push('--gpus', 'all');
+  }
+
   // OneCLI gateway — injects HTTPS_PROXY + certs so container API calls
   // are routed through the agent vault for credential injection. Optional:
   // installs that don't configure OneCLI rely on per-group OAuth credentials
