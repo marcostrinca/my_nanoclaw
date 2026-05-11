@@ -22,6 +22,21 @@ export interface RunnerConfig {
 
 const DEFAULT_MAX_MESSAGES = 10;
 
+// Matches `$VAR` or `${VAR}` as the entire string — substring interpolation is
+// intentionally NOT supported to avoid surprises with literal `$` in tokens.
+const ENV_REF = /^\$\{?(\w+)\}?$/;
+
+function expandEnvRefs(env: Record<string, string> | undefined): Record<string, string> {
+  if (!env) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    const m = typeof v === 'string' ? ENV_REF.exec(v) : null;
+    if (m && process.env[m[1]] !== undefined) out[k] = process.env[m[1]] as string;
+    else out[k] = v;
+  }
+  return out;
+}
+
 let _config: RunnerConfig | null = null;
 
 /**
@@ -44,7 +59,12 @@ export function loadConfig(): RunnerConfig {
     groupName: (raw.groupName as string) || '',
     agentGroupId: (raw.agentGroupId as string) || '',
     maxMessagesPerPrompt: (raw.maxMessagesPerPrompt as number) || DEFAULT_MAX_MESSAGES,
-    mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
+    mcpServers: Object.fromEntries(
+      Object.entries((raw.mcpServers as RunnerConfig['mcpServers']) || {}).map(([name, server]) => [
+        name,
+        { ...server, env: expandEnvRefs(server.env) },
+      ]),
+    ),
     model: (raw.model as string) || undefined,
     effort: (raw.effort as string) || undefined,
   };
