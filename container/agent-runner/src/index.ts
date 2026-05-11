@@ -81,6 +81,34 @@ async function main(): Promise<void> {
     },
   };
 
+  // Google Drive MCPs — auto-registered for every agent_group when the host
+  // mounted ~/.gdrive-mcp/gcp-oauth.keys.json into the container. The MCP
+  // servers themselves are in-process bun scripts shipped alongside the
+  // agent-runner (gdrive-read-mcp.ts + gdrive-write-mcp.ts). Skipped silently
+  // on installs without Google Drive credentials.
+  const GDRIVE_CREDS_DIR = '/home/node/.gdrive-mcp';
+  const gdriveKeysPath = `${GDRIVE_CREDS_DIR}/gcp-oauth.keys.json`;
+  if (fs.existsSync(gdriveKeysPath)) {
+    try {
+      const keys = JSON.parse(fs.readFileSync(gdriveKeysPath, 'utf-8'));
+      const creds = keys.installed || keys.web;
+      if (creds?.client_id && creds?.client_secret) {
+        const gdriveReadPath = path.join(path.dirname(mcpServerPath), '..', 'gdrive-read-mcp.ts');
+        const gdriveWritePath = path.join(path.dirname(mcpServerPath), '..', 'gdrive-write-mcp.ts');
+        if (fs.existsSync(gdriveReadPath)) {
+          mcpServers['gdrive'] = { command: 'bun', args: ['run', gdriveReadPath], env: { GDRIVE_CREDS_DIR } };
+          log('GDrive read MCP registered');
+        }
+        if (fs.existsSync(gdriveWritePath)) {
+          mcpServers['gdrive-write'] = { command: 'bun', args: ['run', gdriveWritePath], env: { GDRIVE_CREDS_DIR } };
+          log('GDrive write MCP registered');
+        }
+      }
+    } catch (err) {
+      log(`gdrive: failed to read credentials: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
     mcpServers[name] = serverConfig;
     log(`Additional MCP server: ${name} (${serverConfig.command})`);
