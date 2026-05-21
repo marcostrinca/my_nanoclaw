@@ -43,6 +43,8 @@ export interface ContainerConfig {
   maxMessagesPerPrompt?: number;
   model?: string;
   effort?: string;
+  /** GPU passthrough — 'none' (default), 'all', or a docker --gpus device spec. */
+  gpuAccess?: string;
 }
 
 /** Build a `ContainerConfig` from a DB row + agent group identity. */
@@ -63,6 +65,7 @@ export function configFromDb(row: ContainerConfigRow, group: AgentGroup): Contai
     maxMessagesPerPrompt: row.max_messages_per_prompt ?? undefined,
     model: row.model ?? undefined,
     effort: row.effort ?? undefined,
+    gpuAccess: row.gpu_access && row.gpu_access !== 'none' ? row.gpu_access : undefined,
   };
 }
 

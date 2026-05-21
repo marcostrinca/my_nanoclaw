@@ -25,6 +25,7 @@ export interface ContainerConfigRow {
   packages_npm: string; // JSON: string[]
   additional_mounts: string; // JSON: AdditionalMountConfig[]
   cli_scope: string; // 'disabled' | 'group' | 'global'
+  gpu_access: string; // 'none' | 'all' | <gpu-id> e.g. '0' or 'device=GPU-UUID'
   updated_at: string;
 }
 

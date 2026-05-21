@@ -435,6 +435,15 @@ async function buildContainerArgs(
   // Host gateway
   args.push(...hostGatewayArgs());
 
+  // GPU passthrough — per-agent, configured via container_configs.gpu_access.
+  // Defaults to 'none' (no GPU). 'all' forwards every GPU. A device spec
+  // (e.g. '0', 'device=GPU-xxxx') is passed verbatim to `docker --gpus`.
+  // No-op on hosts without GPU support — docker will surface the error if
+  // an agent requests GPU on a host without /dev/nvidia0.
+  if (containerConfig.gpuAccess) {
+    args.push('--gpus', containerConfig.gpuAccess);
+  }
+
   // User mapping
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();

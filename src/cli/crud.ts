@@ -69,6 +69,12 @@ export interface ResourceDef {
   };
   /** Non-standard verbs (grant, revoke, add, remove, restart, etc.). */
   customOperations?: Record<string, CustomOperation>;
+  /**
+   * Optional hook run after the row is inserted by `genericCreate`. Receives
+   * the inserted row's values. Use for side-effects that must accompany every
+   * create (e.g. seeding a related table). Errors propagate to the caller.
+   */
+  afterCreate?: (values: Record<string, unknown>) => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,6 +164,7 @@ function genericCreate(def: ResourceDef) {
     getDb()
       .prepare(`INSERT INTO ${def.table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')})`)
       .run(values);
+    await def.afterCreate?.(values);
     return values;
   };
 }

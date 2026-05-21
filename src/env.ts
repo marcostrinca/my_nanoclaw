@@ -40,3 +40,32 @@ export function readEnvFile(keys: string[]): Record<string, string> {
 
   return result;
 }
+
+/**
+ * List every key in the .env file whose name starts with `prefix`.
+ * Returns the full keys (including the prefix). Used by adapters that
+ * support multiple instances via per-instance env vars
+ * (e.g. SLACK_BOT_TOKEN_YUME, SLACK_BOT_TOKEN_ANDY).
+ *
+ * Like readEnvFile, this reads .env directly and does not consult process.env.
+ */
+export function listEnvKeysMatching(prefix: string): string[] {
+  const envFile = path.join(process.cwd(), '.env');
+  let content: string;
+  try {
+    content = fs.readFileSync(envFile, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  const keys: string[] = [];
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    if (key.startsWith(prefix)) keys.push(key);
+  }
+  return keys;
+}

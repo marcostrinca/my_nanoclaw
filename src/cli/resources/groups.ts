@@ -4,6 +4,7 @@ import { restartAgentGroupContainers } from '../../container-restart.js';
 import { getSession } from '../../db/sessions.js';
 import { writeSessionMessage } from '../../session-manager.js';
 import {
+  ensureContainerConfig,
   getContainerConfig,
   updateContainerConfigScalars,
   updateContainerConfigJson,
@@ -27,6 +28,7 @@ function presentConfig(row: ContainerConfigRow): Record<string, unknown> {
     packages_npm: JSON.parse(row.packages_npm),
     additional_mounts: JSON.parse(row.additional_mounts),
     cli_scope: row.cli_scope,
+    gpu_access: row.gpu_access,
     updated_at: row.updated_at,
   };
 }
@@ -58,6 +60,10 @@ registerResource({
     { name: 'created_at', type: 'string', description: 'Auto-set.', generated: true },
   ],
   operations: { list: 'open', get: 'open', create: 'approval', update: 'approval', delete: 'approval' },
+  // Seed a default container_config row so the first session spawn doesn't
+  // fail with "Container config not found". The agent_groups row and the
+  // container_configs row are conceptually one entity — never one without the other.
+  afterCreate: (values) => ensureContainerConfig(values.id as string),
   customOperations: {
     restart: {
       access: 'approval',
@@ -123,7 +129,7 @@ registerResource({
       access: 'approval',
       description:
         'Update container config scalar fields. Changes are saved but do NOT take effect until you run `ncl groups restart`. ' +
-        'Use --id <group-id> and any of: --provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope.',
+        'Use --id <group-id> and any of: --provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope, --gpu-access.',
       handler: async (args) => {
         const id = args.id as string;
         if (!id) throw new Error('--id is required');
@@ -133,7 +139,14 @@ registerResource({
         const updates: Partial<
           Pick<
             ContainerConfigRow,
-            'provider' | 'model' | 'effort' | 'image_tag' | 'assistant_name' | 'max_messages_per_prompt' | 'cli_scope'
+            | 'provider'
+            | 'model'
+            | 'effort'
+            | 'image_tag'
+            | 'assistant_name'
+            | 'max_messages_per_prompt'
+            | 'cli_scope'
+            | 'gpu_access'
           >
         > = {};
         if (args.provider !== undefined) updates.provider = args.provider as string;
@@ -150,10 +163,20 @@ registerResource({
           }
           updates.cli_scope = scope;
         }
+        if (args['gpu-access'] !== undefined || args.gpu_access !== undefined) {
+          const gpu = String(args['gpu-access'] ?? args.gpu_access);
+          // Accept 'none', 'all', or a docker --gpus device spec (e.g. '0',
+          // 'device=GPU-xxxx', '"device=0,1"'). Whitespace and an empty string
+          // are rejected; everything else is passed verbatim to `docker --gpus`.
+          if (!gpu.trim()) {
+            throw new Error('--gpu-access must be one of: none, all, or a docker --gpus device spec');
+          }
+          updates.gpu_access = gpu;
+        }
 
         if (Object.keys(updates).length === 0) {
           throw new Error(
-            'Nothing to update — provide at least one of: --provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope',
+            'Nothing to update — provide at least one of: --provider, --model, --effort, --image-tag, --assistant-name, --max-messages-per-prompt, --cli-scope, --gpu-access',
           );
         }
 
