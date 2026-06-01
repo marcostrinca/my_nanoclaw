@@ -183,17 +183,29 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     // channels we merely sit in stays silent — no row, no DB writes.
     if (!isMention) return;
     const mgId = `mg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Adapters with requiresChannelApproval=false (e.g. WhatsApp) opt out of
+    // the approval flow: new contacts are auto-denied so messages are silently
+    // dropped without sending a notification card to the owner.
+    const autoDeny = adapter?.requiresChannelApproval === false;
     mg = {
       id: mgId,
       channel_type: event.channelType,
       platform_id: event.platformId,
       name: null,
       is_group: event.message.isGroup ? 1 : 0,
-      unknown_sender_policy: 'request_approval',
-      denied_at: null,
+      unknown_sender_policy: 'strict',
+      denied_at: autoDeny ? new Date().toISOString() : null,
       created_at: new Date().toISOString(),
     };
     createMessagingGroup(mg);
+    if (autoDeny) {
+      log.debug('Auto-denied new messaging group (adapter opted out of channel registration)', {
+        id: mgId,
+        channelType: event.channelType,
+        platformId: event.platformId,
+      });
+      return;
+    }
     log.info('Auto-created messaging group', {
       id: mgId,
       channelType: event.channelType,

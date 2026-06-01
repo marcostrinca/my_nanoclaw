@@ -138,6 +138,17 @@ export interface ChannelAdapter {
   resolveChannelName?(platformId: string): Promise<string | null>;
 
   /**
+   * Whether new messaging groups on this adapter go through the
+   * channel-registration approval flow when they first appear.
+   *
+   * true (default) — unknown channels trigger the approval card.
+   * false          — unknown channels are silently auto-denied on first contact.
+   *                  Useful for channels like WhatsApp where every DM
+   *                  would otherwise generate an approval notification.
+   */
+  requiresChannelApproval?: boolean;
+
+  /**
    * Subscribe the bot to a thread so follow-up messages route via the
    * platform's "subscribed message" path (onSubscribedMessage in Chat SDK).
    * Called by the router when a mention-sticky wiring first engages in a
