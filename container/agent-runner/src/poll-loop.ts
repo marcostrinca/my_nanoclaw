@@ -7,6 +7,7 @@ import {
   type MessageInRow,
 } from './db/messages-in.js';
 import { writeMessageOut } from './db/messages-out.js';
+import { getSessionRouting } from './db/session-routing.js';
 import { getInboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
   clearContinuation,
@@ -768,14 +769,26 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
   // that came from this same channel+platform. In agent-shared sessions,
   // different destinations have different thread contexts — using a single
   // routing.threadId would stamp one channel's thread onto another.
+  // Prefer the session's canonical bound thread when this destination is the
+  // same channel+platform the session is bound to. This keeps final-block
+  // replies in the originating thread instead of falling back to the newest
+  // inbound message for the channel (which may be the channel root, causing
+  // Hopper to answer in agent-coding instead of the asking thread).
+  // `undefined` distinguishes matched-session-thread-null from no-match.
+  const session = getSessionRouting();
+  const boundThread =
+    session.channel_type === channelType && session.platform_id === platformId
+      ? session.thread_id
+      : undefined;
   const destRouting = resolveDestinationThread(channelType, platformId);
+  const threadId = boundThread !== undefined ? boundThread : (destRouting?.threadId ?? null);
   writeMessageOut({
     id: generateId(),
     in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
-    thread_id: destRouting?.threadId ?? null,
+    thread_id: threadId,
     content: JSON.stringify({ text: body }),
   });
 }
