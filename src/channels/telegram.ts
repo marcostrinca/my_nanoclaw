@@ -24,7 +24,6 @@ import { createMessagingGroup, getMessagingGroupByPlatform, updateMessagingGroup
 import { grantRole, hasAnyOwner } from '../modules/permissions/db/user-roles.js';
 import { upsertUser } from '../modules/permissions/db/users.js';
 import { createChatSdkBridge, type ReplyContext } from './chat-sdk-bridge.js';
-import { sanitizeTelegramLegacyMarkdown } from './telegram-markdown-sanitize.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
 import { tryConsume } from './telegram-pairing.js';
@@ -156,13 +155,13 @@ function createPairingInterceptor(
       // code-bearing message never reaches an agent. Privilege is now a
       // property of the paired user, not the chat: upsert the user, and if
       // this instance has no owner yet, promote them to owner.
-      const existing = getMessagingGroupByPlatform(channelType, platformId);
+      const existing = await getMessagingGroupByPlatform(channelType, platformId);
       if (existing) {
-        updateMessagingGroup(existing.id, {
+        await updateMessagingGroup(existing.id, {
           is_group: consumed.consumed!.isGroup ? 1 : 0,
         });
       } else {
-        createMessagingGroup({
+        await createMessagingGroup({
           id: `mg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           channel_type: channelType,
           platform_id: platformId,
@@ -174,7 +173,7 @@ function createPairingInterceptor(
       }
 
       const pairedUserId = `${channelType}:${consumed.consumed!.adminUserId}`;
-      upsertUser({
+      await upsertUser({
         id: pairedUserId,
         kind: 'telegram',
         display_name: null,
@@ -182,8 +181,8 @@ function createPairingInterceptor(
       });
 
       let promotedToOwner = false;
-      if (!hasAnyOwner()) {
-        grantRole({
+      if (!(await hasAnyOwner())) {
+        await grantRole({
           user_id: pairedUserId,
           role: 'owner',
           agent_group_id: null,
@@ -223,7 +222,11 @@ function buildBridge(channelType: string, token: string): ChannelAdapter {
     concurrency: 'concurrent',
     extractReplyContext,
     supportsThreads: false,
-    transformOutboundText: sanitizeTelegramLegacyMarkdown,
+    // No transformOutboundText: @chat-adapter/telegram >= 4.29 parses
+    // CommonMark and renders escaped MarkdownV2 itself. The legacy-Markdown
+    // sanitizer this replaced was written for the old converter and, run in
+    // front of the new one, downgraded **bold** to *single-star* — which the
+    // adapter then parsed as emphasis and rendered as _italic_.
     maxTextLength: 4000,
   });
 

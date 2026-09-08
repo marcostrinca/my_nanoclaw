@@ -12,9 +12,9 @@ import type { Migration } from './index.js';
 export const moduleGpuAccess: Migration = {
   version: 100,
   name: 'container-configs-gpu-access',
-  up(db) {
+  async up(db) {
     try {
-      db.exec(`ALTER TABLE container_configs ADD COLUMN gpu_access TEXT NOT NULL DEFAULT 'none'`);
+      await db.exec(`ALTER TABLE container_configs ADD COLUMN gpu_access TEXT NOT NULL DEFAULT 'none'`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('duplicate column') || msg.includes('already exists')) return;

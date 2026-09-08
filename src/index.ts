@@ -171,18 +171,9 @@ async function main(): Promise<void> {
   // 8. Start the `ncl` CLI socket server (data/ncl.sock).
   await startCliServer();
 
-  // 8. Dashboard (optional)
-  const dashboardEnv = readEnvFile(['DASHBOARD_SECRET', 'DASHBOARD_PORT']);
-  const dashboardSecret = process.env.DASHBOARD_SECRET || dashboardEnv.DASHBOARD_SECRET;
-  const dashboardPort = parseInt(process.env.DASHBOARD_PORT || dashboardEnv.DASHBOARD_PORT || '3100', 10);
-  if (dashboardSecret) {
-    const { startDashboard } = await import('@nanoco/nanoclaw-dashboard');
-    const { startDashboardPusher } = await import('./dashboard-pusher.js');
-    startDashboard({ port: dashboardPort, secret: dashboardSecret });
-    startDashboardPusher({ port: dashboardPort, secret: dashboardSecret, intervalMs: 60000 });
-  } else {
-    log.info('Dashboard disabled (no DASHBOARD_SECRET)');
-  }
+  // Dashboard (optional; no-ops without DASHBOARD_SECRET)
+  const { startDashboard } = await import('./dashboard-pusher.js');
+  await startDashboard();
 
   log.info('NanoClaw running');
 }
