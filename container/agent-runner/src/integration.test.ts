@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
-import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
+import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './mailbox/sqlite/connection.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { getPendingMessages } from './db/messages-in.js';
 import { getContinuation, setContinuation } from './db/session-state.js';
+import { getSessionRouting } from './db/session-routing.js';
 import { MockProvider } from './providers/mock.js';
 import type { ProviderExchange } from './providers/types.js';
 import { runPollLoop } from './poll-loop.js';
+
+const MOCK_PROVIDER_CONTRACT = {
+  textDelivery: 'mid-turn-complete',
+  commands: { formatting: 'xml' },
+} as const;
 
 beforeEach(() => {
   initTestSessionDb();
@@ -33,6 +39,13 @@ function insertMessage(id: string, content: object, opts?: { platformId?: string
 }
 
 describe('poll loop integration', () => {
+  it('defaults only when the legacy session routing table is absent', () => {
+    expect(getSessionRouting()).toEqual({ channel_type: null, platform_id: null, thread_id: null });
+
+    getInboundDb().exec('CREATE VIEW session_routing AS SELECT * FROM missing_routing');
+    expect(() => getSessionRouting()).toThrow(/missing_routing/);
+  });
+
   it('should pick up a message, process it, and write a response', async () => {
     insertMessage('m1', { sender: 'Alice', text: 'What is the meaning of life?' }, { platformId: 'chan-1', channelType: 'discord', threadId: 'thread-1' });
 
@@ -303,6 +316,7 @@ async function runPollLoopWithTimeout(provider: MockProvider, signal: AbortSigna
   return Promise.race([
     runPollLoop({
       provider,
+      providerContract: MOCK_PROVIDER_CONTRACT,
       providerName: 'mock',
       cwd: '/tmp',
       signal,
@@ -497,7 +511,6 @@ describe('poll loop — /clear command', () => {
  * Provider that throws on every query, simulating API failures.
  */
 class ThrowingProvider {
-  readonly supportsNativeSlashCommands = false;
   private errorMessage: string;
 
   constructor(errorMessage: string) {
@@ -526,8 +539,6 @@ class ThrowingProvider {
  * First emits an init event (setting continuation), then throws.
  */
 class InvalidSessionProvider {
-  readonly supportsNativeSlashCommands = false;
-
   isSessionInvalid(): boolean {
     return true;
   }
@@ -592,7 +603,6 @@ describe('poll loop — slash command during active query', () => {
  * the loop interrupts an active stream.
  */
 class BlockingProvider {
-  readonly supportsNativeSlashCommands = false;
   queries = 0;
   aborts = 0;
   ends = 0;
