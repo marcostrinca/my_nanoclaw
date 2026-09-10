@@ -34,7 +34,14 @@ import {
   writeCodexConfigToml,
 } from './codex-app-server.js';
 
-const TURN_TIMEOUT_MS = 10 * 60 * 1000;
+// Hard wall-clock cap per turn, armed at turn start and never reset by
+// activity. Raised from 10 to 25 minutes on 2026-09-10: reasoning models at
+// high effort on a long thread were still streaming when the old cap fired,
+// and the turn is acked completed, so the answer is lost with no redelivery.
+// Stays strictly under `ABSOLUTE_CEILING_MS` (30 min) in the host reconciler,
+// which kills on heartbeat age; the poll loop keeps heartbeating through a
+// turn, so the two do not race.
+const TURN_TIMEOUT_MS = 25 * 60 * 1000;
 
 export interface CodexRuntimeDeps {
   writeCodexConfigToml: typeof writeCodexConfigToml;
