@@ -44,6 +44,65 @@ describe('CodexProvider active turns', () => {
     expect(fake.killed).toBe(true);
   });
 
+  it('keeps retrying errors in the same turn until success, without replaying input', async () => {
+    const fake = createFakeCodexRuntime();
+    const query = createCodexProvider({}, fake.runtime).query({ prompt: 'work', cwd: '/workspace/agent' });
+    const events: ProviderEvent[] = [];
+    let failure: unknown;
+    const collect = collectEvents(query.events, events).catch((error) => { failure = error; });
+
+    await waitFor(() => fake.startCalls.length === 1);
+    fake.notify('error', { error: { message: 'Reconnecting... 2/5' }, willRetry: true });
+    await sleep(0);
+    expect(fake.killed).toBe(false);
+    expect(events.some((event) => event.type === 'error' || event.type === 'result')).toBe(false);
+    expect(events).toContainEqual({ type: 'progress', message: 'Reconnecting... 2/5' });
+    query.push('follow-up during reconnection');
+    await waitFor(() => fake.steerCalls.length === 1);
+    fake.notify('error', { error: { message: 'Reconnecting... 3/5' }, willRetry: true });
+    query.end();
+    fake.completeTurn('recovered answer');
+    await collect;
+
+    expect(failure).toBeUndefined();
+    expect(fake.startCalls).toHaveLength(1);
+    expect(fake.steerCalls[0].turnId).toBe('turn-1');
+    expect(events.filter((event) => event.type === 'result')).toEqual([{ type: 'result', text: 'recovered answer' }]);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+    expect(fake.killed).toBe(true);
+  });
+
+  for (const ending of ['false', 'missing', 'string', 'completed'] as const) {
+    it(`reports final failure after reconnection when ending is ${ending}`, async () => {
+      const fake = createFakeCodexRuntime();
+      const query = createCodexProvider({}, fake.runtime).query({ prompt: 'work', cwd: '/workspace/agent' });
+      const events: ProviderEvent[] = [];
+      let failure: unknown;
+      const collect = collectEvents(query.events, events).catch((error) => { failure = error; });
+      await waitFor(() => fake.startCalls.length === 1);
+      fake.notify('error', { error: { message: 'temporary failure' }, willRetry: true });
+      await sleep(0);
+      expect(fake.killed).toBe(false);
+      const error = { message: 'Reconnecting... 5/5', additionalDetails: 'stream disconnected' };
+      if (ending === 'completed') {
+        fake.notify('turn/completed', { turn: { error, items: [{ type: 'agentMessage', text: 'partial answer' }] } });
+      } else {
+        const flag = ending === 'missing' ? {} : { willRetry: ending === 'string' ? 'true' : false };
+        fake.notify('error', { error, ...flag });
+      }
+      query.end();
+      await collect;
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toBe('Reconnecting... 5/5: stream disconnected');
+      expect(events.filter((event) => event.type === 'error')).toEqual([{
+        type: 'error', message: 'Reconnecting... 5/5: stream disconnected', retryable: false, classification: undefined,
+      }]);
+      expect(events.some((event) => event.type === 'result')).toBe(false);
+      expect(fake.startCalls).toHaveLength(1);
+      expect(fake.killed).toBe(true);
+    });
+  }
+
   it('keeps a turn alive at 25 and 59 minutes, then expires at exactly 60 minutes', async () => {
     jest.useFakeTimers();
     const fake = createFakeCodexRuntime();
@@ -67,6 +126,8 @@ describe('CodexProvider active turns', () => {
       query.end();
 
       for (const elapsed of [25 * 60 * 1000, 34 * 60 * 1000, 60 * 1000 - 1]) {
+        // Retry activity must not reset the hard wall-clock deadline.
+        fake.notify('error', { error: { message: 'retrying' }, willRetry: true });
         jest.advanceTimersByTime(elapsed);
         await flush();
         expect(settled).toBe(false);
@@ -233,6 +294,9 @@ describe('CodexProvider active turns', () => {
     // No pending request exists mid-turn (turn/start already resolved), so
     // only the exitHandlers seam can end the turn — without it this parks
     // on the waker until the wall-clock turn timeout.
+    fake.notify('error', { error: { message: 'retrying' }, willRetry: true });
+    await sleep(0);
+    expect(fake.killed).toBe(false);
     fake.crashServer(new Error('Codex app-server exited: code=1 signal=null'));
 
     // The generator yields the error event, then rethrows to its consumer.
@@ -282,6 +346,7 @@ function createFakeCodexRuntime(opts: { rejectSteer?: boolean } = {}) {
 
   return {
     runtime,
+    notify,
     startCalls,
     steerCalls,
     interruptCalls,

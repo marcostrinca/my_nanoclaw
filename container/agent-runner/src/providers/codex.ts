@@ -339,6 +339,12 @@ async function* runOneTurn(
       case 'error': {
         const err = params.error as { message?: string; additionalDetails?: string | null } | undefined;
         const msg = [err?.message, err?.additionalDetails].filter(Boolean).join(': ') || 'Codex turn failed';
+        // App-server owns stream recovery. Only its explicit boolean permits
+        // waiting in this same turn; never infer retries from the error text.
+        if (params.willRetry === true) {
+          buffer.push({ type: 'progress', message: msg });
+          break;
+        }
         state.error = new Error(msg);
         finishTurn();
         break;
