@@ -35,13 +35,11 @@ import {
 } from './codex-app-server.js';
 
 // Hard wall-clock cap per turn, armed at turn start and never reset by
-// activity. Raised from 10 to 25 minutes on 2026-09-10: reasoning models at
-// high effort on a long thread were still streaming when the old cap fired,
-// and the turn is acked completed, so the answer is lost with no redelivery.
-// Stays strictly under `ABSOLUTE_CEILING_MS` (30 min) in the host reconciler,
-// which kills on heartbeat age; the poll loop keeps heartbeating through a
-// turn, so the two do not race.
-const TURN_TIMEOUT_MS = 25 * 60 * 1000;
+// activity. Raised to 60 minutes on 2026-09-12 so long-running reasoning
+// and tool work can finish. This is separate from the host reconciler's
+// ABSOLUTE_CEILING_MS (30 minutes of heartbeat inactivity, not turn duration).
+// Provider events refresh the heartbeat; leave that inactivity watchdog intact.
+const TURN_TIMEOUT_MS = 60 * 60 * 1000;
 
 export interface CodexRuntimeDeps {
   writeCodexConfigToml: typeof writeCodexConfigToml;
@@ -371,7 +369,7 @@ async function* runOneTurn(
   server.notificationHandlers.push(handler);
 
   // A dead app-server can't send the notification this turn is parked on —
-  // end the turn immediately with the real cause instead of the 10-min timeout.
+  // end the turn immediately with the real cause instead of the wall-clock timeout.
   const onServerExit = (err: Error): void => {
     if (turnDone) return;
     state.error = err;

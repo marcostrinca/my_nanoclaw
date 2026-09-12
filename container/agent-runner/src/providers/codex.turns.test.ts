@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -42,6 +42,54 @@ describe('CodexProvider active turns', () => {
     expect(events.filter((event) => event.type === 'activity').length).toBeGreaterThanOrEqual(2);
     expect(events.filter((event) => event.type === 'result')).toEqual([{ type: 'result', text: 'final answer' }]);
     expect(fake.killed).toBe(true);
+  });
+
+  it('keeps a turn alive at 25 and 59 minutes, then expires at exactly 60 minutes', async () => {
+    jest.useFakeTimers();
+    const fake = createFakeCodexRuntime();
+    const provider = createCodexProvider({}, fake.runtime);
+    const query = provider.query({ prompt: 'long-running work', cwd: '/workspace/agent' });
+    const events: ProviderEvent[] = [];
+    let settled = false;
+    let failure: unknown;
+    const collect = collectEvents(query.events, events).then(
+      () => { settled = true; },
+      (error) => { settled = true; failure = error; },
+    );
+    // Drain async generator continuations without advancing the fake clock.
+    const flush = async () => {
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    };
+
+    try {
+      await flush();
+      expect(fake.startCalls).toHaveLength(1);
+      query.end();
+
+      for (const elapsed of [25 * 60 * 1000, 34 * 60 * 1000, 60 * 1000 - 1]) {
+        jest.advanceTimersByTime(elapsed);
+        await flush();
+        expect(settled).toBe(false);
+        expect(fake.killed).toBe(false);
+        expect(events.some((event) => event.type === 'error')).toBe(false);
+      }
+
+      jest.advanceTimersByTime(1);
+      await collect;
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toBe('Turn timed out after 3600000ms');
+      const errors = events.filter((event) => event.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({
+        message: 'Turn timed out after 3600000ms',
+        retryable: false,
+      });
+      expect(events.some((event) => event.type === 'result')).toBe(false);
+      expect(fake.killed).toBe(true);
+    } finally {
+      query.abort();
+      jest.useRealTimers();
+    }
   });
 
   it('queues follow-ups for the next turn when steering is rejected', async () => {
@@ -184,7 +232,7 @@ describe('CodexProvider active turns', () => {
 
     // No pending request exists mid-turn (turn/start already resolved), so
     // only the exitHandlers seam can end the turn — without it this parks
-    // on the waker until the 10-minute turn timeout.
+    // on the waker until the wall-clock turn timeout.
     fake.crashServer(new Error('Codex app-server exited: code=1 signal=null'));
 
     // The generator yields the error event, then rethrows to its consumer.
