@@ -39,6 +39,23 @@ describe('compaction delivery reminder', () => {
   });
 });
 
+describe('compaction working state', () => {
+  it('asks the summary to keep open tasks, approvals and exact identifiers', () => {
+    const instructions = buildCompactInstructions(['family'], null);
+
+    expect(instructions).toContain('3. Preserve the working state');
+    expect(instructions).toContain('answer quoted verbatim and its message id');
+    expect(instructions).toContain('Exact identifiers');
+  });
+
+  it('keeps the delivery reminder as the last instruction', () => {
+    const instructions = buildCompactInstructions(['family'], null);
+
+    expect(instructions).toContain('4. At the END of the compaction summary');
+    expect(instructions.trimEnd().endsWith('Available destinations: `family`."')).toBe(true);
+  });
+});
+
 describe('post-compaction reminder', () => {
   it('re-states the canonical delivery sentences with the live destinations', () => {
     const reminder = buildPostCompactionReminder(['family', 'ops'], null);

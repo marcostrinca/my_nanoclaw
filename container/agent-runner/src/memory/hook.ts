@@ -1,5 +1,6 @@
 import fs from 'fs';
 
+import { getTaskSeriesId } from '../db/session-routing.js';
 import { MEMORY_SESSION_HOOK, memoryContextForSessionStart, type MemorySessionStartSource } from './session-hook.js';
 
 function readSource(): MemorySessionStartSource | undefined {
@@ -17,6 +18,18 @@ function readSource(): MemorySessionStartSource | undefined {
   return undefined;
 }
 
+async function isTaskRun(): Promise<boolean> {
+  try {
+    await import('../mailbox/compose.js');
+    return getTaskSeriesId() !== null;
+  } catch {
+    // No session to read (tests, or a run outside a container): treat it as a chat.
+    return false;
+  }
+}
+
 const source = readSource();
-const context = source ? memoryContextForSessionStart(source, process.argv[2]) : undefined;
+const context = source
+  ? memoryContextForSessionStart(source, process.argv[2], { workingState: !(await isTaskRun()) })
+  : undefined;
 if (context) console.log(context);

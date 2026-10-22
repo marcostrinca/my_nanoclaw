@@ -1,4 +1,5 @@
 import { renderMemorySection } from './context.js';
+import { renderWorkingStateSection } from './working-state.js';
 
 const MEMORY_CONTEXT_SOURCES = ['startup', 'clear', 'compact'] as const;
 
@@ -17,7 +18,18 @@ export const MEMORY_SESSION_HOOK: MemorySessionHookRegistration = {
   sources: MEMORY_CONTEXT_SOURCES,
 };
 
+export interface MemoryContextOptions {
+  /** Isolated task runs leave out the chat's working state. */
+  readonly workingState?: boolean;
+}
+
 /** Return memory only when a provider is establishing a new context window. */
-export function memoryContextForSessionStart(source: MemorySessionStartSource, baseDir?: string): string | undefined {
-  return source === 'resume' ? undefined : renderMemorySection(baseDir);
+export function memoryContextForSessionStart(
+  source: MemorySessionStartSource,
+  baseDir?: string,
+  options: MemoryContextOptions = {},
+): string | undefined {
+  if (source === 'resume') return undefined;
+  const memory = renderMemorySection(baseDir);
+  return options.workingState === false ? memory : `${memory}\n${renderWorkingStateSection(baseDir)}`;
 }

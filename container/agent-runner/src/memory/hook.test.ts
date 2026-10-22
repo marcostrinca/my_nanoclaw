@@ -27,6 +27,7 @@ describe('memory-hook script', () => {
 
     expect(proc.exitCode).toBe(0);
     expect(proc.stdout.toString()).toContain('## Memory');
+    expect(proc.stdout.toString()).toContain('## Working state');
   });
 
   it('prints nothing for resume', () => {

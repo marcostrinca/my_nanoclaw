@@ -26,6 +26,8 @@ describe('memory SessionStart contract', () => {
       for (const [source, shouldInject] of Object.entries(expected)) {
         expect(Boolean(memoryContextForSessionStart(source as MemorySessionStartSource, base))).toBe(shouldInject);
       }
+      expect(memoryContextForSessionStart('compact', base)).toContain('## Working state');
+      expect(memoryContextForSessionStart('compact', base, { workingState: false })).not.toContain('## Working state');
     } finally {
       fs.rmSync(base, { recursive: true, force: true });
     }
