@@ -64,7 +64,18 @@ export function buildCompactInstructions(names: string[], taskId: string | null)
     '2. Preserve the chronological message/reply sequence of recent exchanges.',
     '   The agent needs to see: who said what, in what order, and from which destination.',
     '',
-    '3. At the END of the compaction summary, include this verbatim reminder:',
+    '3. Preserve the working state, so the agent can carry on without asking again:',
+    '   - Every open task: who asked for it (with the message id), what is done, and the exact next step.',
+    '   - Every approval the agent asked for, with the answer quoted verbatim and its message id.',
+    '     An approval covers only the task it was given for, so say which task it covers.',
+    '   - Decisions taken and why, including options that were rejected.',
+    '   - Corrections and preferences the user gave about how the agent should work, quoted verbatim.',
+    '   - Exact identifiers: file paths, branches, commits, ids, URLs, hosts, working commands and error messages.',
+    '   - What is waiting on whom: the user, another agent, or an external system.',
+    '   - What was verified against real data and what is still unverified.',
+    '   Prefer exact values over paraphrase. Drop finished work only once it has been reported.',
+    '',
+    '4. At the END of the compaction summary, include this verbatim reminder:',
     ...deliveryReminder,
   ].join('\n');
 }
@@ -74,6 +85,9 @@ function formatDestinationNames(names: string[]): string {
 }
 
 if (import.meta.main) {
+  // As the PreCompact hook this file runs in its own process, so it has to
+  // compose the mailbox the runner registers at startup (modules/index.ts).
+  await import('./mailbox/compose.js');
   const names = getAllDestinations().map((destination) => destination.name);
   console.log(buildCompactInstructions(names, getTaskSeriesId()));
 }
