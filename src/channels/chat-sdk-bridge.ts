@@ -13,6 +13,7 @@ import {
   Actions,
   Button,
   LinkButton,
+  markdownToPlainText,
   type CardChild,
   type Adapter,
   type AssistantContextChangedEvent,
@@ -366,6 +367,13 @@ export interface ChatSdkBridgeConfig {
    * and reactions still target the head of the reply.
    */
   maxTextLength?: number;
+  /**
+   * Optional predicate for errors where the platform rejected the message's
+   * formatting (e.g. Telegram "can't parse entities"). When it matches, the
+   * bridge resends the same chunk once as plain text instead of failing the
+   * delivery, so the message still arrives, just without formatting.
+   */
+  isFormatRejection?: (err: unknown) => boolean;
 }
 
 /**
@@ -943,10 +951,21 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i];
           const attachFiles = i === 0 && fileUploads && fileUploads.length > 0;
-          const result = await adapter.postMessage(
-            tid,
-            attachFiles ? { markdown: chunk, files: fileUploads } : { markdown: chunk },
-          );
+          let result;
+          try {
+            result = await adapter.postMessage(
+              tid,
+              attachFiles ? { markdown: chunk, files: fileUploads } : { markdown: chunk },
+            );
+          } catch (err) {
+            if (!config.isFormatRejection?.(err)) throw err;
+            log.warn('Platform rejected message formatting; resending as plain text', {
+              adapter: adapter.name,
+              err: err instanceof Error ? err.message : String(err),
+            });
+            const plain = markdownToPlainText(chunk);
+            result = await adapter.postMessage(tid, attachFiles ? { raw: plain, files: fileUploads } : { raw: plain });
+          }
           if (i === 0) firstId = result?.id;
         }
         return firstId;

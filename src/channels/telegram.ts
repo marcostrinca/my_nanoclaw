@@ -228,6 +228,9 @@ function buildBridge(channelType: string, token: string): ChannelAdapter {
     // front of the new one, downgraded **bold** to *single-star* — which the
     // adapter then parsed as emphasis and rendered as _italic_.
     maxTextLength: 4000,
+    // 4.29 has no fallback of its own: a bare URL with "_" or "~" makes
+    // Telegram answer "can't parse entities" and the message is dropped.
+    isFormatRejection: (err) => err instanceof Error && /can't parse (?:caption )?entities/i.test(err.message),
   });
 
   const botUsernamePromise = fetchBotUsername(token);

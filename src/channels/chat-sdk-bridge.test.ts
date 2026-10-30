@@ -542,3 +542,40 @@ describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
     expect(msg.markdown).toBe('plain hello');
   });
 });
+
+describe('createChatSdkBridge.deliver — format rejection fallback', () => {
+  const failing = 'Fontes:\nhttps://huggingface.co/PoopMan333/H3_Character_Sheet_Generator';
+  const rejection = new Error("Bad Request: can't parse entities: Can't find end of a URL at byte offset 9");
+
+  function rejectMarkdownOnce() {
+    const calls: PostCall[] = [];
+    const postMessage = async (threadId: string, message: AdapterPostableMessage): Promise<RawMessage<unknown>> => {
+      calls.push({ threadId, message });
+      if (typeof message === 'object' && message !== null && 'markdown' in message) throw rejection;
+      return { id: 'msg-plain', threadId, raw: {} };
+    };
+    return { calls, postMessage };
+  }
+
+  it('resends once as plain text when the predicate matches', async () => {
+    const { calls, postMessage } = rejectMarkdownOnce();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+      isFormatRejection: (err) => err instanceof Error && /can't parse entities/i.test(err.message),
+    });
+    const id = await bridge.deliver('telegram:1', null, { kind: 'chat', content: { text: failing } });
+    expect(id).toBe('msg-plain');
+    expect(calls).toHaveLength(2);
+    expect(calls[1].message).toEqual({ raw: expect.stringContaining('H3_Character_Sheet_Generator') });
+  });
+
+  it('rethrows when no predicate is configured, so delivery retries as before', async () => {
+    const { calls, postMessage } = rejectMarkdownOnce();
+    const bridge = createChatSdkBridge({ adapter: stubAdapter({ postMessage }), supportsThreads: false });
+    await expect(bridge.deliver('telegram:1', null, { kind: 'chat', content: { text: failing } })).rejects.toThrow(
+      "can't parse entities",
+    );
+    expect(calls).toHaveLength(1);
+  });
+});
