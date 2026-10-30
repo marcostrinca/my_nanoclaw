@@ -292,6 +292,33 @@ describe('deliverSessionMessages — retry and permanent failure', () => {
     expect(row!.platform_message_id).toBeNull();
   });
 
+  it('tells the agent in its own session when a message fails permanently', async () => {
+    await seedAgentAndChannel();
+    const { session } = await resolveSession('ag-1', 'mg-1', null, 'shared');
+    insertOutbound('ag-1', session.id, 'out-dropped');
+    setDeliveryAdapter({
+      async deliver() {
+        throw new Error("Bad Request: can't parse entities");
+      },
+    });
+
+    for (let i = 0; i < 3; i++) await deliverSessionMessages(session);
+
+    const db = openInboundDb('ag-1', session.id);
+    const rows = db
+      .prepare("SELECT kind, channel_type, content FROM messages_in WHERE id = 'sys-delivery-failed-out-dropped'")
+      .all() as Array<{ kind: string; channel_type: string; content: string }>;
+    db.close();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe('chat');
+    expect(rows[0].channel_type).toBe('agent');
+    const body = JSON.parse(rows[0].content) as { text: string; sender: string };
+    expect(body.sender).toBe('system');
+    expect(body.text).toContain('out-dropped');
+    expect(body.text).toContain("can't parse entities");
+    expect(body.text).toContain('hello');
+  });
+
   it('clears attempt counter on successful delivery', async () => {
     await seedAgentAndChannel();
     const { session } = await resolveSession('ag-1', 'mg-1', null, 'shared');

@@ -24,7 +24,8 @@ import { isUnguarded, type Unguarded } from './guard/index.js';
 import { fanOutboundMessage } from './modules/cross-session-context/index.js';
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
-import { clearOutbox, readOutboxFiles, withExistingMailboxSession } from './session-manager.js';
+import { clearOutbox, readOutboxFiles, withExistingMailboxSession, writeSessionMessage } from './session-manager.js';
+import { requestWake } from './request-wake.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
 import type { PendingApproval, Session } from './types.js';
@@ -198,6 +199,48 @@ async function pollSweep(): Promise<void> {
   setTimeout(() => void pollSweep(), SWEEP_POLL_MS);
 }
 
+/**
+ * Tell the agent that one of its messages was dropped after the last retry.
+ * Without this the agent only sees the "Message sent" ack from send_message
+ * (which means queued, not delivered) and believes the user got it.
+ */
+async function notifyDeliveryFailure(session: Session, msg: OutboundMessage, err: unknown): Promise<void> {
+  if (msg.kind === 'system' || msg.kind === 'task_log') return;
+  let preview = '';
+  try {
+    const parsed = JSON.parse(msg.content) as { text?: unknown; markdown?: unknown };
+    const body =
+      typeof parsed.text === 'string' ? parsed.text : typeof parsed.markdown === 'string' ? parsed.markdown : '';
+    preview = body.replace(/\s+/g, ' ').slice(0, 160);
+  } catch {
+    // Non-JSON content: no preview.
+  }
+  const reason = err instanceof Error ? err.message : String(err);
+  const text =
+    `Delivery failed: your message ${msg.id} to ${msg.channelType ?? 'unknown'}:${msg.platformId ?? 'unknown'} ` +
+    `was NOT delivered after ${MAX_DELIVERY_ATTEMPTS} attempts. Error: ${reason}. ` +
+    (preview ? `It started with: "${preview}". ` : '') +
+    'The recipient did not receive it; send it again, fixing the cause if the error points to one.';
+  try {
+    await writeSessionMessage(session.agent_group_id, session.id, {
+      id: `sys-delivery-failed-${msg.id}`,
+      kind: 'chat',
+      timestamp: new Date().toISOString(),
+      platformId: session.agent_group_id,
+      channelType: 'agent',
+      threadId: null,
+      content: JSON.stringify({ text, sender: 'system', senderId: 'system' }),
+    });
+    await requestWake(session, 'inbound-message');
+  } catch (notifyErr) {
+    log.error('Failed to notify agent of permanent delivery failure', {
+      messageId: msg.id,
+      sessionId: session.id,
+      err: notifyErr,
+    });
+  }
+}
+
 export async function deliverSessionMessages(session: Session): Promise<void> {
   // Reject re-entry from a concurrent poll on the same session — see the
   // comment on inflightDeliveries above.
@@ -304,6 +347,7 @@ async function drainSession(session: Session): Promise<void> {
             err: markErr,
           });
         }
+        await notifyDeliveryFailure(session, msg, err);
       } else {
         log.warn('Message delivery failed, will retry', {
           messageId: msg.id,
